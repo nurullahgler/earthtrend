@@ -7,7 +7,7 @@
   // 2026-11-15: every visit starts with the intro. Simulate (index.html) leaves a one-time pass; without it, or on a reload, the intro plays first.
   try { if (sessionStorage.getItem('etFromIntro') !== '1') location.replace('index.html'); else sessionStorage.removeItem('etFromIntro'); } catch (e) {}
   // 2026-11-15: the globe spawns in (see startSpawn); until then the globe and the panels wait out of sight
-  if (!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) document.documentElement.classList.add('pre-spawn');
+  document.documentElement.classList.add('pre-spawn');   // 2026-11-15: the spawn always plays, as the intro does (the team's choice)
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Earth Trend Detective</title>
