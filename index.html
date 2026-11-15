@@ -199,9 +199,6 @@
             .topnav { top: 18px; gap: 12px; }
             .nav-btn { height: 50px; min-width: 140px; padding: 0 24px; font-size: 17px; }
         }
-        @media (prefers-reduced-motion: reduce) {
-            .nav-btn, .topnav.shown .nav-btn { transform: none; transition: opacity .2s, visibility 0s; }
-        }
 
         /* About ekranı: tam ekran sayfa. Sol üstte Back, "Who are We" başlığı, altında metin bölümü.
            Animasyon ekranının üstüne açılır; Back (ya da Esc) ile geri dönülür. */
@@ -275,7 +272,6 @@
             .about-inner { padding: 90px 18px 56px; }
             .about-text { font-size: 16.5px; }
         }
-        @media (prefers-reduced-motion: reduce) { .about-page { animation: none; } }
         /* 2026-11-15: exit after Simulate: the buttons go first, then the scene falls back and fades to the globe page's black */
         body.leaving .topnav { opacity: 0; transition: opacity .25s ease; }
         body.leaving #composition-stage { transform: scale(.82); opacity: 0; transition: transform .65s cubic-bezier(.5, 0, .75, 0), opacity .55s ease .1s; }
@@ -690,7 +686,9 @@
     </div>
 
     <script>
-        const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+        // 2026-11-15: the team's choice: the intro always plays in full, also on devices set to reduce motion (iPhone Reduce Motion,
+        // Android / Samsung power saving, Windows animation effects off), where it used to jump to its last frame
+        const reduceMotion = false;
 
         /* =========================================================================
            1. HAREKET EDEN YILDIZLAR
