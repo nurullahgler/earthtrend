@@ -1,4 +1,5 @@
 # Earth Trend Detective
+(DISCLAIMER: CLAUDE CODE WAS USED IN ORDER TO MAKE THIS PROJECT)
 
 NASA Space Apps Challenge 2026, challenge **Be An Earth System Trend Detective!**
 
