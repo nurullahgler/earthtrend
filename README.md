@@ -23,7 +23,7 @@ selected country, which comes live from NASA GIBS.
 | Server | Hands out files and nothing else. Any static host works (GitHub Pages, Netlify, a plain web server). No database, no accounts, nothing about a visitor is stored. |
 | Visitor's browser | All the work: the globe, colouring the map, the charts, the significance test, the forecast years, the crop detector and the pop-up. The sharper 0.5° grids load only when their trend is chosen. |
 | NASA GIBS | Close-up satellite imagery of a selected country, fetched by the browser straight from NASA. |
-| CDNs (intro only) | The intro page loads three.js r128 (cdnjs), its fonts (Google Fonts) and two Earth images (unpkg). Without internet it falls back to its own drawn Earth. The globe page needs none of them. |
+| CDNs (intro only) | The intro page loads its fonts (Google Fonts) and two Earth images (unpkg). Neither holds it up: without them it uses its own fonts and its own drawn Earth. three.js comes from this site. The globe page needs none of them. |
 | Before publishing (`tools/`) | Turning the raw data into the files in `vendor/`. Not needed to view the site. |
 
 ## What you can do
@@ -54,6 +54,8 @@ The Earth keeps turning, except while a clicked country is popped out (or Earth 
 | Satellite imagery | NASA GIBS | the globe's surface |
 | Borders | Natural Earth | countries |
 | Crop production 1961-2024 | FAOSTAT | the crop detector |
+| Vegetation health 1982-2025 | NOAA STAR (VHI) | the crop detector |
+| Ocean and air cycles (El Niño, IOD, NAO, tropical Atlantic, PDO, AMO) | NOAA PSL | the crop detector |
 
 ## Methods, and how each was tested
 
@@ -74,10 +76,16 @@ years of the chosen range. Forecast years and partly measured years (2026, and 1
 p < 0.05: a rise or fall this steady would come from year-to-year chance fewer than 1 time in 20. The code is the EarthTrend engine's
 own, copied unchanged, and gives the same p on the same series (Turkey, daily maximum temperature, 1990 to 2025: p 0.0064 in both).
 
-**Crop detector.** A logistic model, trained on harvests up to 2010 and scored on 2011-2024. It ranks country-crops by risk well
-(AUC 0.69) and beats each crop's usual shortfall rate (Brier skill 0.052, lower 5 % bound 0.036). Its signal is how bumpy a crop's past
-has been, so it is good at where and blind to when: inside one country it cannot pick the bad year (AUC 0.45). Soil moisture before
-sowing, El Niño, prices and conflict were tested as extra inputs and added nothing, so they are not used.
+**Crop detector.** A random forest (500 decision trees), trained on harvests up to 2010 and scored on 2011-2024, years it never saw. Before
+each season it reads the crop's past harvests, the weather, soil and plant health (NOAA vegetation health) in the three months before
+sowing, and El Niño plus five other ocean and air cycles (NOAA PSL indices). Against the earlier formula: ranks country-crops better
+(AUC 0.729 vs 0.702), beats each crop's usual shortfall rate by more (Brier skill 0.105 vs 0.069, lower 5 % bound 0.087), and inside one
+country picks the bad year a little better than a coin (AUC 0.566 vs 0.498). Its chances run about 4 points high (24 % said, 20 % happened
+in 2011-2024: shortfalls were rarer after 2010). It failed our calibration-slope rule (1.34 vs 1.26); we use it anyway by our own decision,
+because judged in tenths its percentages are as honest as the formula's and sharper. "Unsure" marks the crops whose trees disagree most;
+those cases had twice the error, and no other model we tested (boosting, distributional, the formula) did better on them. History is
+leak-free: each past harvest is judged only against the years before it. The chances shown come from the same forest refitted on every
+harvest up to 2024. Training code and every test: `EarthTrend/ML` (not part of this site).
 
 ## Limits
 
