@@ -264,6 +264,23 @@
   .coords b.v { font-weight: 600; }
   .coords .hint { color: var(--faint); }
   .coords [hidden] { display: none; }
+  .coords { left: 62px; }                         /* 2026-11-15: right of the zoom buttons */
+
+  /* 2026-11-15: zoom in / out, bottom left */
+  .zoom {
+    position: fixed; left: 12px; bottom: 14px; z-index: 3;
+    display: flex; flex-direction: column; overflow: hidden;
+    border-radius: 8px; background: var(--glass); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .4);
+  }
+  .zoom button {
+    width: 40px; height: 40px; display: grid; place-items: center; padding: 0;
+    background: none; border: 0; cursor: pointer; color: var(--text);
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none;
+  }
+  .zoom button + button { border-top: 1px solid var(--line-2); }
+  .zoom button:hover { background: var(--hover); color: var(--accent); }
+  .zoom button:active { background: var(--hover-2); }
+  .zoom button:disabled { opacity: .35; cursor: default; background: none; color: var(--text); }
 
   /* credits, bottom centre of the globe area */
   .credits {
@@ -377,7 +394,9 @@
       border-left: 0; border-top: 1px solid var(--line-2); }
     .trends .side-grip, .chart-grip { display: none; }
     .trends-body { overflow: visible; }
-    .coords { bottom: calc(var(--sheet-h) + 8px); left: 8px; min-width: 0; max-width: 62vw; font-size: 11px; }
+    .coords { bottom: calc(var(--sheet-h) + 8px); left: 60px; min-width: 0; max-width: calc(100vw - 190px); font-size: 11px; }
+    .zoom { left: 8px; bottom: calc(var(--sheet-h) + 8px); }
+    .zoom button { width: 44px; height: 44px; }   /* a finger-sized target */
     .credits { display: none; }
     .exit { left: auto; right: 8px; transform: none; bottom: calc(var(--sheet-h) + 10px); }   /* right of the country box, not on it */
     .exag { left: 50%; top: calc(var(--bar-h) + 8px); }
@@ -463,6 +482,15 @@
   </div>
   <div class="row hint" id="pinHint">Click a country to select it</div>
   <div class="row" id="ptrRow" hidden><span class="k">Pointer</span><span class="v" id="ptrVal"></span></div>
+</div>
+<!-- 2026-11-15: zoom in / out, bottom left (works with the mouse and on touch screens) -->
+<div class="zoom" role="group" aria-label="Zoom">
+  <button id="zoomIn" type="button" aria-label="Zoom in" title="Zoom in">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+  <button id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
+  </button>
 </div>
 <div class="credits">&copy; 2026 Earth Trend Detective &middot; Data: NASA POWER (MERRA-2, CERES), NASA GIBS &middot; Borders: Natural Earth</div>
 
@@ -776,6 +804,7 @@
     holeId: { value: 0 },        // country (index + 1) that has been lifted out of the globe
     holeAmt: { value: 0 },
     isCap: { value: 0 },         // 1 on the lifted country's top
+    capBase: { value: 0.003 },   // 3D relief: how far the lifted piece's flat base lies under sea level (globe radii, + 0.1 x exag)
     flatten: { value: 0 },       // lifted top: 0 = curved like the globe, 1 = flat 2D map
     hiA: { value: blank }, hiB: { value: blank },     // lifted country: sharp NASA GIBS images
     hiBox: { value: new THREE.Vector4(0, 0, 1, 1) },  // their area in globe uv (u0, v0, du, dv)
@@ -794,16 +823,44 @@
     dimAmt: { value: 0 }         // darkens the globe while a country is lifted
   };
 
+  // 2026-11-15: lifted piece in 3D relief: the heights are read with a smooth cubic B-spline (4 bilinear reads) instead of
+  // one bilinear read, so the raised 2D map has smooth slopes instead of creases along the elevation map's texels
+  // ("crumpled paper"). It blends in with the flattening, so the piece still matches the globe as it leaves it.
+  const TOPO_GLSL = `
+    uniform vec2 topoTexel;
+    vec4 topoW(float v) {
+      vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v, s = n * n * n;
+      float x = s.x, y = s.y - 4.0 * s.x, z = s.z - 4.0 * s.y + 6.0 * s.x;
+      return vec4(x, y, z, 6.0 - x - y - z) / 6.0;
+    }
+    float topoSmooth(vec2 uv) {
+      vec2 size = 1.0 / topoTexel, p = uv * size - 0.5, i = floor(p), f = p - i;
+      vec4 wx = topoW(f.x), wy = topoW(f.y);
+      vec2 g0 = vec2(wx.x + wx.y, wy.x + wy.y), g1 = vec2(wx.z + wx.w, wy.z + wy.w);
+      vec2 h0 = (i + 0.5 + vec2(wx.y, wy.y) / g0 - 1.0) * topoTexel, h1 = (i + 0.5 + vec2(wx.w, wy.w) / g1 + 1.0) * topoTexel;
+      float a = texture2D(topoTex, vec2(h0.x, h0.y)).r, b = texture2D(topoTex, vec2(h1.x, h0.y)).r;
+      float c = texture2D(topoTex, vec2(h0.x, h1.y)).r, d = texture2D(topoTex, vec2(h1.x, h1.y)).r;
+      return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
+    }
+    float capHeight(vec2 uv, float flatten) {
+      float h = texture2D(topoTex, uv).r;
+      return flatten > 0.0 ? mix(h, topoSmooth(uv), flatten) : h;
+    }`;
+
   const vertexShader = `
     attribute vec3 flatPos;                            // lifted top: its place on the flat 2D map
+    attribute float wall;                              // lifted piece: 0 its top, 1 / 2 the side wall's upper / lower edge
     uniform float isCap, mode, exag, flatten;
     uniform vec3 capUp;
-    uniform float capRelief;
+    uniform float capRelief, capBase;
     uniform sampler2D topoTex;
     varying vec2 vUv;
     varying vec3 vN, vE, vNo, vViewPos;
+    varying float vWall;
+    ${TOPO_GLSL}
     void main() {
       vUv = uv;
+      vWall = 0.0;
       vec3 n = normalize(position);
       vec3 e = vec3(n.z, 0.0, -n.x);                   // east (direction of increasing longitude)
       e = length(e) < 1e-4 ? vec3(0.0, 0.0, -1.0) : normalize(e);
@@ -812,8 +869,16 @@
       vNo = normalize(normalMatrix * cross(n, e));     // north
       vec3 p = position;
       if (isCap > 0.5) {
+        vWall = wall;
         p = mix(position, flatPos, flatten);
-        if (mode > 6.5) p += normalize(mix(n, capUp, flatten)) * texture2D(topoTex, uv).r * exag * mix(1.0, capRelief, flatten);   // 3D relief
+        if (mode > 6.5) {                              // 3D relief
+          vec3 dir = normalize(mix(n, capUp, flatten));
+          float s = exag * mix(1.0, capRelief, flatten);
+          // 2026-11-15: the top and the wall's upper edge stand on the ground; the wall's lower edge goes down to a flat
+          // base under sea level, so the piece is a solid block with sides, not a thin hollow sheet
+          if (wall > 1.5) p -= dir * (capBase + 0.1 * exag) * mix(1.0, capRelief, flatten);
+          else p += dir * capHeight(uv, flatten) * s;
+        }
       }
       else if (mode > 6.5) p *= 1.0 + texture2D(topoTex, uv).r * exag;   // 3D relief
       vec4 mvp = modelViewMatrix * vec4(p, 1.0);
@@ -834,6 +899,7 @@
     uniform vec3 accent;
     varying vec2 vUv;
     varying vec3 vN, vE, vNo;
+    varying float vWall;
 
     const vec2 ID_SIZE = vec2(${ID_W}.0, ${ID_H}.0);
     const vec3 SEA = vec3(0.027, 0.043, 0.075), NODATA = vec3(0.16, 0.19, 0.24);
@@ -991,6 +1057,15 @@
         float edge = 1.0 - max(dot(normalize(vN), normalize(-vViewPos)), 0.0);
         col = mix(col, vec3(0.42, 0.66, 1.0), pow(edge, 3.2) * (trendOn > 0.5 ? 0.35 : 0.62));
         col *= 1.0 - 0.4 * dimAmt;
+      }
+      if (isCap > 0.5 && vWall > 0.5) {
+        // 2026-11-15: side wall of the raised piece (3D relief): earth colours, darker towards the base, lit by its own face
+        float t = clamp(vWall - 1.0, 0.0, 1.0);
+        vec3 fn = normalize(cross(dFdx(vViewPos), dFdy(vViewPos)));
+        float lit = 0.5 + 0.5 * abs(dot(fn, normalize(vec3(-0.45, 0.55, 0.7))));
+        vec3 soil = mix(vec3(0.50, 0.40, 0.29), vec3(0.17, 0.13, 0.10), smoothstep(0.0, 1.0, t));
+        soil = mix(vec3(0.34, 0.30, 0.20), soil, smoothstep(0.0, 0.06, t));   // a thin top-soil band under the surface
+        col = soil * lit;
       }
       gl_FragColor = vec4(col, 1.0);
     }`;
@@ -1454,7 +1529,7 @@
               up.z * lift + east.z * ex + north.z * ny];
     };
 
-    const pos = [], flat = [], uv = [], idx = [], line = [], lineFlat = [];
+    const pos = [], flat = [], uv = [], idx = [], line = [], lineFlat = [], wall = [], widx = [];
     const edge = c.polar ? 1.2 : Math.max(0.2, Math.min(2, fit / D2R * 2 / 90)), edge2 = edge * edge;   // mesh size, degrees
     const OPEN = 2 * Math.PI - 1e-4;
     const toP = !c.polar ? p => [p[0], p[1]] : ([lon, lat]) => {
@@ -1512,8 +1587,36 @@
         pos.push(g.x, g.y, g.z);
         flat.push(...flatOf(lon, lat, 1));
         uv.push((lon + 180) / 360, (lat + 90) / 180);
+        wall.push(0);
       }
       for (const k of tri) idx.push(base + k);
+
+      // 2026-11-15: side walls along the coast and the borders (3D relief: the shader raises their upper edge with the ground
+      // and sinks the lower one to a flat base; in the other views both edges stay together and the walls are not seen).
+      // Every edge of the outline is cut into the same 2^k equal pieces as the top's split gave it, so the wall's upper edge
+      // meets the top exactly, with no cracks.
+      for (const ring of rings) {
+        for (let k = 0; k < ring.length; k++) {
+          const a = ring[k], b = ring[(k + 1) % ring.length];
+          if (isCut(a, b)) continue;
+          const pa = toP(a), pb = toP(b);
+          let n = 1, l2 = (pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2;
+          while (l2 > edge2 && n < 1 << 20) { l2 /= 4; n *= 2; }
+          const w0 = pos.length / 3;
+          for (let j = 0; j <= n; j++) {
+            const s = j / n, [lon, lat] = fromP([pa[0] + (pb[0] - pa[0]) * s, pa[1] + (pb[1] - pa[1]) * s]);
+            const g = dirOf(lon, lat), f = flatOf(lon, lat, 1), u = (lon + 180) / 360, v = (lat + 90) / 180;
+            pos.push(g.x, g.y, g.z, g.x, g.y, g.z);
+            flat.push(...f, ...f);
+            uv.push(u, v, u, v);
+            wall.push(1, 2);
+          }
+          for (let j = 0; j < n; j++) {
+            const t0 = w0 + 2 * j, b0 = t0 + 1, t1 = t0 + 2, b1 = t0 + 3;
+            widx.push(t0, b0, t1, t1, b0, b1);
+          }
+        }
+      }
 
       // outline, a hair above the top so it never hides behind it
       for (const ring of rings) {
@@ -1564,7 +1667,8 @@
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('flatPos', new THREE.Float32BufferAttribute(flat, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    geo.setIndex(idx);
+    geo.setAttribute('wall', new THREE.Float32BufferAttribute(wall, 1));
+    geo.setIndex(idx.concat(widx));                   // the top, then its side walls (the hit test below uses only the top)
     // the same triangles laid flat: what the pointer is tested against once the country is a 2D map
     const flatGeo = new THREE.BufferGeometry();
     flatGeo.setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
@@ -1600,18 +1704,20 @@
     const outline = new THREE.LineSegments(lineGeo, new THREE.ShaderMaterial({
       uniforms: {
         flatten: { value: 0 }, opacity: { value: 0 }, color: { value: new THREE.Color('#3b82f6') },
-        capUp: { value: up.clone() }, capRelief: { value: capRelief }, topoTex: uniforms.topoTex, exag: uniforms.exag, mode: uniforms.mode
+        capUp: { value: up.clone() }, capRelief: { value: capRelief }, topoTex: uniforms.topoTex, topoTexel: uniforms.topoTexel,
+        exag: uniforms.exag, mode: uniforms.mode
       },
       vertexShader: `
         attribute vec3 flatPos;
         uniform float flatten, exag, mode, capRelief;
         uniform vec3 capUp;
         uniform sampler2D topoTex;
+        ${TOPO_GLSL}
         void main() {
           vec3 p = mix(position, flatPos, flatten), d = normalize(position);
           if (mode > 6.5) {
             vec2 uv = vec2(atan(-d.z, d.x) / 6.2831853 + 0.5, asin(clamp(d.y, -1.0, 1.0)) / 3.1415927 + 0.5);
-            p += normalize(mix(d, capUp, flatten)) * (texture2D(topoTex, uv).r * exag * mix(1.0, capRelief, flatten) + 0.002);
+            p += normalize(mix(d, capUp, flatten)) * (capHeight(uv, flatten) * exag * mix(1.0, capRelief, flatten) + 0.002);
           }
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
@@ -2031,6 +2137,27 @@
     targetZ = null;                          // the user took over the zoom
     camDist = Math.max(1.25, Math.min(6, camDist * (1 + Math.sign(e.deltaY) * 0.08)));
   }, { passive: false });
+
+  // 2026-11-15: zoom buttons (bottom left), for touch screens that have no wheel. With a country focused they step its
+  // focus zoom (1x frames the whole country, up to 6x), starting from wherever the wheel left the camera; on the globe they
+  // move the camera in or out within the wheel's range. The camera eases to the new distance.
+  const ZOOM_STEP = 1.5;
+  function zoomBy(dir) {
+    spawn = null;
+    lastTouch = performance.now();
+    wake();
+    const cur = targetZ !== null ? targetZ : camDist;
+    if (lifted && lifted.goal === 1) {
+      const R = 1 + LIFT + uniforms.exag.value;
+      const now = (focusDistance(lifted) - R) / Math.max(1e-3, cur - R);    // the zoom on screen now
+      setZoom(now * (dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP));
+    } else {
+      targetZ = Math.max(1.25, Math.min(6, 1 + (cur - 1) * (dir > 0 ? 1 / ZOOM_STEP : ZOOM_STEP)));
+      camRate = CAM_RATE;
+    }
+  }
+  document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1));
+  document.getElementById('zoomOut').addEventListener('click', () => zoomBy(-1));
 
   let lastFrame = performance.now();
   const SPIN_SPEED = 2 * Math.PI / 45, SPIN_WAIT = 2500;   // radians a second; ms of calm before it turns again
