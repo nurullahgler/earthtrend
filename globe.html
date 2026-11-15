@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <link rel="icon" href="vendor/logo.jpg">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script>
   // 2026-11-15: every visit starts with the intro. Simulate (index.html) leaves a one-time pass; without it, or on a reload, the intro plays first.
   try { if (sessionStorage.getItem('etFromIntro') !== '1') location.replace('index.html'); else sessionStorage.removeItem('etFromIntro'); } catch (e) {}
