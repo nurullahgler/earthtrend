@@ -27,7 +27,7 @@ for (const [iso, crops] of Object.entries(SF.countries)) {
   for (const [crop, v] of Object.entries(crops)) {
     const prod = Array.from({ length: Y.y1 - Y.y0 + 1 }, (_, k) => { const x = Y.countries[iso]?.[crop]?.prod?.[k]; return isNum(x) && x > 0 ? x : NaN; });
     const sm = gaussSmooth(prod, 5), dep = prod.map((x, k) => (isNum(x) && isNum(sm[k]) ? +(100 * (x / sm[k] - 1)).toFixed(1) : null));
-    out[iso][crop] = { p: v.p, observedRate2011_24: v.observedRate2011_24, y0: 1986, departure: dep.slice(1986 - Y.y0), lastProdT: isNum(prod.at(-1)) ? Math.round(prod.at(-1)) : null };
+    out[iso][crop] = { p: v.p, u: !!v.u, observedRate2011_24: v.observedRate2011_24, y0: 1986, departure: dep.slice(1986 - Y.y0), lastProdT: isNum(prod.at(-1)) ? Math.round(prod.at(-1)) : null };
   }
 }
 writeFileSync(new URL('../vendor/cropbot.js', import.meta.url), 'window.CROPBOT=' + JSON.stringify({ built: new Date().toISOString(), forYear: SF.forYear, event: SF.event, validation: SF.validation, yearsTo: Y.y1, countries: out }) + ';\n');
