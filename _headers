@@ -1,0 +1,13 @@
+# Cloudflare Pages: how long browsers may keep each file before asking again.
+# The globe's data, scripts and images: one hour, so the files the intro prefetches are used as they are, without a check.
+/vendor/*
+  Cache-Control: public, max-age=3600
+/favicon.ico
+  Cache-Control: public, max-age=86400
+# The two pages: always checked, so a new version shows up at once.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/globe.html
+  Cache-Control: no-cache

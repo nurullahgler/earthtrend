@@ -1,0 +1,3349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" href="vendor/logo.jpg">
+<script>
+  // 2026-11-15: every visit starts with the intro. Simulate (index.html) leaves a one-time pass; without it, or on a reload, the intro plays first.
+  try { if (sessionStorage.getItem('etFromIntro') !== '1') location.replace('index.html'); else sessionStorage.removeItem('etFromIntro'); } catch (e) {}
+  // 2026-11-15: the globe spawns in (see startSpawn); until then the globe and the panels wait out of sight
+  if (!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) document.documentElement.classList.add('pre-spawn');
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Earth Trend Detective</title>
+<style>
+  :root {
+    --bg: #05080f;
+    --panel: #0a101b;
+    --panel-2: #111a29;
+    --line: rgba(255, 255, 255, .10);
+    --line-2: rgba(255, 255, 255, .18);
+    --text: #e8eef7;
+    --muted: #8d9bb0;
+    --faint: #5f6d82;
+    --accent: #3b82f6;            /* plain blue: buttons, selection, focus, chart line, lifted-country outline */
+    --side-w: 300px;              /* trends sidebar on the right; dragged wider or narrower */
+    /* 2026-11-15: colours that were written in place, now named so light mode can change them */
+    --glass: rgba(10, 16, 27, .92); --sheet: rgba(10, 16, 27, .93); --hover: rgba(255, 255, 255, .06); --hover-2: rgba(255, 255, 255, .12);
+    --scrim: rgba(5, 8, 15, .22); --chart-grid: rgba(255, 255, 255, .07); --chart-zero: rgba(255, 255, 255, .28);
+    --chart-cross: rgba(255, 255, 255, .45); --space: #000000; --yes: #7cc47f; --no: #e0a43c; --brand-trend: #3fb5a5; --credit-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+  }
+  /* 2026-11-15: light mode (click the EarthTREND logo, top right; the choice is remembered) */
+  html[data-theme="light"] {
+    --bg: #eef2f7; --panel: #ffffff; --panel-2: #f3f6fa; --line: rgba(15, 23, 42, .10); --line-2: rgba(15, 23, 42, .18);
+    --text: #0f172a; --muted: #4b5a70; --faint: #7a879a; --accent: #2563eb;
+    --glass: rgba(255, 255, 255, .92); --sheet: rgba(255, 255, 255, .95); --hover: rgba(15, 23, 42, .05); --hover-2: rgba(15, 23, 42, .10);
+    --scrim: rgba(226, 232, 240, .25); --chart-grid: rgba(15, 23, 42, .08); --chart-zero: rgba(15, 23, 42, .30);
+    --chart-cross: rgba(15, 23, 42, .45); --space: #dfe7f1; --yes: #2f8a3a; --no: #b26b00; --brand-trend: #1f8f82; --credit-shadow: none;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, "Segoe UI", Roboto, Arial, sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  #stage { position: fixed; inset: 44px var(--side-w) 0 0; cursor: grab; touch-action: none; }
+  #stage.drag { cursor: grabbing; }
+  #stage.over { cursor: pointer; }
+
+  /* hover label */
+  .tip {
+    position: fixed; z-index: 3; pointer-events: none;
+    padding: 3px 8px; border-radius: 5px;
+    background: var(--glass); border: 1px solid var(--line-2);
+    font-size: 12px; white-space: nowrap; transform: translate(12px, 12px);
+    display: flex; align-items: baseline; gap: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+  }
+  .tip[hidden] { display: none; }
+  .tip b { font-weight: 600; }
+  .tip span { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .tip span:empty { display: none; }
+
+  /* 2026-11-15: spawn after Simulate. The globe fades in while the camera flies in; then the bar, the side panel and the corners slide in */
+  html.pre-spawn #stage canvas { opacity: 0; }
+  html.pre-spawn .bar { opacity: 0; transform: translateY(-16px); }
+  html.pre-spawn .trends { opacity: 0; transform: translateX(28px); }
+  html.pre-spawn .coords, html.pre-spawn .credits { opacity: 0; }
+  html.spawn-run #stage canvas { transition: opacity .9s ease; }
+  html.spawn-run .bar { transition: opacity .7s ease .75s, transform .9s cubic-bezier(.16, 1, .3, 1) .75s; }
+  html.spawn-run .trends { transition: opacity .7s ease 1s, transform .9s cubic-bezier(.16, 1, .3, 1) 1s; }
+  html.spawn-run .coords, html.spawn-run .credits { transition: opacity .8s ease 1.3s; }
+
+  /* top selection bar */
+  .bar {
+    position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 4;
+    display: flex; align-items: center; gap: 12px; padding: 0 8px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .bar-btn {
+    display: inline-flex; align-items: center; gap: 7px; flex: none;
+    height: 30px; padding: 0 10px; border-radius: 6px;
+    background: var(--panel-2); border: 1px solid var(--line-2); cursor: pointer; font-size: 12.5px;
+  }
+  .bar-btn:hover, .bar-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+  .bar-btn .caret { transition: transform .15s; }
+  .bar-btn[aria-expanded="true"] .caret { transform: rotate(180deg); }
+  .sel { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; font-size: 12.5px; overflow: hidden; }   /* 2026-11-15: overflow hidden, the logo sits to its right */
+  @media (max-width: 900px) { .years > span:first-child, .timeline .ends { display: none; } }
+  .sel .cont { color: var(--muted); white-space: nowrap; }
+  .sel .sep { color: var(--faint); }
+  .sel b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sel b.none { font-weight: 400; color: var(--faint); }
+  .sel .clear {
+    width: 20px; height: 20px; border-radius: 50%; border: 0; padding: 0; flex: none;
+    background: var(--hover); color: var(--muted); cursor: pointer; line-height: 1;
+  }
+  .sel .clear:hover { color: var(--text); background: var(--hover-2); }
+  .sel .clear[hidden] { display: none; }
+  .brand { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 3px; margin-left: 4px;
+    border-radius: 999px; border: 1px solid transparent; background: none; cursor: pointer; }
+  .brand:hover { border-color: var(--line-2); background: var(--hover); }
+  .brand img.logo { width: 30px; height: 30px; border-radius: 50%; display: block; transition: transform .45s ease; }
+  .brand:hover img.logo { transform: rotate(-12deg); }
+  /* the team's own name image (vendor/wordmark-*.png, cut out of its dark background); a dark-text version for light mode */
+  .brand .bt { display: block; height: 14px; width: auto; flex: none; }
+  .brand .bt-light { display: none; }
+  html[data-theme="light"] .brand .bt-dark { display: none; } html[data-theme="light"] .brand .bt-light { display: block; }
+
+  /* 3D relief: elevation exaggeration, just above the globe */
+  .exag {
+    position: fixed; top: 54px; left: calc((100vw - var(--side-w)) / 2); transform: translateX(-50%); z-index: 3;
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px; border-radius: 999px;
+    background: var(--glass); border: 1px solid var(--line-2);
+    font-size: 12px; color: var(--muted); white-space: nowrap;
+  }
+  .exag[hidden] { display: none; }
+  .exag input { width: 150px; accent-color: var(--accent); }
+  .exag output { min-width: 38px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+  /* year range, in the top bar */
+  .years { display: flex; align-items: center; gap: 6px; flex: none; font-size: 12px; color: var(--muted); }
+  .years select {
+    height: 30px; padding: 0 6px; border-radius: 6px; font: inherit; font-size: 12.5px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line-2); cursor: pointer; font-variant-numeric: tabular-nums;
+  }
+  .years select:focus { outline: none; border-color: var(--accent); }
+
+  /* timeline with play, in the top bar next to the year range */
+  .timeline {
+    flex: 0 1 380px; min-width: 150px;   /* 2026-11-15: was 200 px; it gives way so the wordmark fits at 800 px */
+    display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 2px;
+    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 999px;
+  }
+  .timeline .play {
+    width: 24px; height: 24px; border-radius: 50%; flex: none; padding: 0;
+    display: grid; place-items: center; cursor: pointer;
+    background: var(--accent); border: 0; color: #fff;
+  }
+  .timeline .play:hover { filter: brightness(1.08); }
+  .timeline.off { opacity: .5; }
+  .timeline.off .play { cursor: default; filter: grayscale(.8); }
+  .timeline input { flex: 1; min-width: 0; accent-color: var(--accent); }
+  .timeline .yr { min-width: 34px; text-align: right; font-weight: 600; font-size: 12.5px; font-variant-numeric: tabular-nums; position: relative; }
+  /* a forecast year (after the observations end): said under the year, so the slider does not shift */
+  .timeline .yr.proj::after { content: 'forecast'; position: absolute; right: 0; top: 100%; margin-top: -2px; font-size: 9.5px; font-weight: 500; color: var(--muted); letter-spacing: .02em; }
+  .timeline .ends { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+  /* trends, right */
+  .trends {
+    position: fixed; right: 0; top: 44px; bottom: 0; z-index: 3; width: var(--side-w);
+    display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--line);
+  }
+  .trends-head {
+    padding: 12px 14px 8px;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
+  }
+  .trends-body { flex: 1; overflow-y: auto; padding: 0 12px 14px; }
+  /* chart of the selected country, at the bottom of the sidebar */
+  .tchart { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--line); position: relative; }
+  .tchart .ch-head { display: flex; align-items: baseline; gap: 8px; min-height: 18px; }
+  .tchart .ch-title { font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tchart .ch-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .tchart .ch-read { margin-left: auto; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tchart .ch-read span { color: var(--muted); margin-right: 6px; }
+  .tchart .ch-empty { font-size: 12px; color: var(--faint); padding: 18px 0 8px; }
+  .tchart .ch-sig { margin-top: 6px; font-size: 12px; line-height: 1.45; color: var(--text); }   /* 2026-11-15: is the trend significant */
+  .tchart .ch-sig b.yes { color: var(--yes); } .tchart .ch-sig b.no { color: var(--no); } .tchart .ch-sig .m { color: var(--muted); }
+  .tchart svg { display: block; width: 100%; height: 170px; margin-top: 6px; overflow: visible; touch-action: none; }
+  /* 2026-11-15: an Expand button under the chart and a pop-up over the globe (the globe stays visible behind it) */
+  .cropbot { flex: none; position: relative; display: flex; flex-direction: column; border-top: 1px solid var(--line-2); min-height: 120px; }
+  .crop-grip { position: absolute; top: -4px; left: 0; right: 0; height: 8px; cursor: row-resize; z-index: 2; }
+  .crop-grip:hover, .crop-grip.drag, .crop-grip:focus-visible { background: rgba(59, 130, 246, .35); }
+  .crop-body { flex: 1; overflow-y: auto; padding: 10px 12px 4px; }
+  .crop-body .ch-head { display: flex; align-items: baseline; gap: 8px; min-height: 18px; }
+  .crop-body .ch-title { font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crop-body .ch-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .crop-body .ch-empty { font-size: 12px; color: var(--faint); padding: 14px 0 6px; }
+  .crop-body svg { display: block; width: 100%; margin-top: 4px; overflow: visible; }
+  .tbot { flex: none; display: flex; justify-content: flex-end; padding: 4px 12px 10px; }
+  /* 2026-11-15: crop detector rows in the bottom-right panel */
+  .cb-rows { margin-top: 6px; display: grid; gap: 4px; }
+  .cb-row { display: grid; grid-template-columns: 70px 1fr 36px 58px; white-space: nowrap; align-items: center; gap: 6px; font-size: 12px; }
+  .cb-row i { display: block; height: 7px; border-radius: 4px; background: var(--accent); min-width: 2px; }
+  .cb-row b { text-align: right; font-variant-numeric: tabular-nums; } .cb-row em { font-style: normal; color: var(--muted); font-size: 11px; }
+  .cb-note { margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .tchart svg text, .bot-sheet svg text { font: 10px system-ui, sans-serif; fill: var(--faint); }
+  .tbot[hidden] { display: none; }
+  .tbot button { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 7px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+  .tbot button:hover { border-color: var(--accent); }
+  .bot-pop { position: fixed; inset: 0; z-index: 40; background: var(--scrim); display: flex; align-items: center; justify-content: center; padding: 56px 16px 24px; }
+  .bot-pop[hidden] { display: none; }
+  .bot-sheet { width: min(760px, 100%); max-height: calc(100vh - 90px); overflow-y: auto; background: var(--sheet); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 18px 60px rgba(0, 0, 0, .55); padding: 14px 16px 18px; }
+  .bot-sheet header { display: flex; align-items: baseline; gap: 10px; }
+  .bot-sheet header h2 { margin: 0; font-size: 15px; } .bot-sheet header .k { color: var(--muted); font-size: 12px; }
+  .bot-sheet header button { margin-left: auto; background: none; border: 1px solid var(--line-2); border-radius: 7px; padding: 3px 10px; cursor: pointer; }
+  .bot-sheet h3 { font-size: 12.5px; margin: 14px 0 4px; }
+  .bot-sheet p { margin: 4px 0; } .bot-sheet .m { color: var(--muted); font-size: 11.5px; }
+  .bot-sheet table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  .bot-sheet th, .bot-sheet td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .bot-sheet th { color: var(--muted); font-weight: 500; } .bot-sheet td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bot-sheet svg { display: block; width: 100%; overflow: visible; } .bot-sheet svg text { font: 10.5px system-ui, sans-serif; fill: var(--faint); }
+  .tchart svg text { font: 10.5px system-ui, "Segoe UI", Roboto, Arial, sans-serif; fill: var(--faint); font-variant-numeric: tabular-nums; }
+  .tchart svg text.lab { fill: var(--text); font-weight: 600; }
+  /* drag handle on the left edge of the sidebar */
+  .side-grip {
+    position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 1; touch-action: none;
+  }
+  .side-grip::after {
+    content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: transparent; transition: background .15s;
+  }
+  .side-grip:hover::after, .side-grip.drag::after { background: var(--accent); }
+  body.resizing, body.resizing * { cursor: ew-resize !important; user-select: none; }
+  .tvars { display: flex; flex-direction: column; gap: 2px; }
+  .tvars button {
+    display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 6px 8px;
+    border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted);
+    text-align: left; cursor: pointer; font-size: 12.5px;
+  }
+  .tvars button:hover { background: var(--hover); color: var(--text); }
+  .tvars button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: rgba(59, 130, 246, .10); }
+  .tvars .u { margin-left: auto; color: var(--faint); font-size: 11px; white-space: nowrap; }
+  .tshow { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 10px 0 8px; }
+  .tshow button {
+    height: 26px; border-radius: 6px; font-size: 12px; cursor: pointer;
+    background: none; border: 1px solid var(--line); color: var(--muted);
+  }
+  .tshow button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: rgba(59, 130, 246, .12); }
+  .tshow button:disabled { opacity: .4; cursor: default; }
+  .legend .lbar { height: 8px; border-radius: 4px; }
+  .legend .ticks { display: flex; justify-content: space-between; margin-top: 3px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .legend .cap { font-size: 11px; color: var(--faint); margin-bottom: 4px; }
+  .tdetail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .tdetail b { color: var(--text); font-weight: 600; }
+  .tdetail .row { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tdetail .row span:last-child { color: var(--text); }
+  .tsrc { margin-top: 10px; font-size: 10.5px; color: var(--faint); line-height: 1.35; }
+
+  /* coordinates of the picked point (and the pointer), bottom left */
+  .coords {
+    position: fixed; left: 12px; bottom: 14px; z-index: 3; min-width: 210px; max-width: 250px;
+    padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5;
+    background: var(--glass); border: 1px solid var(--line-2); box-shadow: 0 6px 18px rgba(0, 0, 0, .4);
+    font-variant-numeric: tabular-nums; pointer-events: none;
+  }
+  .coords .row { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+  .coords .k { width: 54px; flex: none; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .coords .v { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  .coords b.v { font-weight: 600; }
+  .coords .hint { color: var(--faint); }
+  .coords [hidden] { display: none; }
+
+  /* credits, bottom centre of the globe area */
+  .credits {
+    position: fixed; left: calc((100vw - var(--side-w)) / 2); bottom: 10px; transform: translateX(-50%); z-index: 2;
+    width: max-content; max-width: max(220px, calc(100vw - var(--side-w) - 500px));
+    font-size: 11px; line-height: 1.35; color: var(--faint); text-align: center; pointer-events: none;
+    text-shadow: var(--credit-shadow);
+  }
+
+
+  /* leaves focus mode */
+  .exit {
+    position: fixed; left: calc((100vw - var(--side-w)) / 2); bottom: 36px; transform: translateX(-50%); z-index: 3;
+    display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px;
+    border-radius: 999px; background: var(--glass); border: 1px solid var(--line-2);
+    font-size: 12.5px; cursor: pointer; box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  }
+  .exit:hover { border-color: var(--accent); color: var(--accent); }
+  .exit[hidden] { display: none; }
+  .exit kbd {
+    font: 11px ui-monospace, Consolas, monospace; padding: 1px 5px; border-radius: 4px;
+    border: 1px solid var(--line-2); color: var(--muted);
+  }
+
+  /* configuration panel: opens on the left, under the button */
+  .panel {
+    position: fixed; top: 52px; left: 8px; z-index: 4;
+    width: min(360px, calc(100vw - 16px));
+    max-height: calc(100dvh - 64px);
+    display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .55); overflow: hidden;
+  }
+  .panel[hidden] { display: none; }
+  .sec-title {
+    padding: 9px 10px 0; font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 8px; border-bottom: 1px solid var(--line); }
+  .modes button {
+    height: 28px; padding: 0 6px; border-radius: 6px; font-size: 12px; white-space: nowrap;
+    background: none; border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+  }
+  .modes button:hover { color: var(--text); border-color: var(--line-2); }
+  .modes button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: rgba(59, 130, 246, .12); }
+  .modes button.loading { opacity: .55; cursor: progress; }
+  .opts { padding: 0 8px 8px; border-bottom: 1px solid var(--line); }
+  .switch {
+    display: flex; align-items: center; justify-content: space-between; width: 100%; height: 30px; padding: 0 8px;
+    border-radius: 6px; background: none; border: 1px solid var(--line); color: var(--muted); font-size: 12px; cursor: pointer;
+  }
+  .switch:hover { color: var(--text); border-color: var(--line-2); }
+  .switch[aria-checked="true"] { color: var(--text); }
+  .switch .track { position: relative; width: 28px; height: 16px; border-radius: 999px; background: var(--line-2); transition: background .2s; }
+  .switch .track::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+    background: #fff; transition: transform .2s;
+  }
+  .switch[aria-checked="true"] .track { background: var(--accent); }
+  .switch[aria-checked="true"] .track::after { transform: translateX(12px); }
+  @media (prefers-reduced-motion: reduce) { .switch .track, .switch .track::after { transition: none; } }
+  .conts { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; border-bottom: 1px solid var(--line); }
+  .conts button {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 8px; border-radius: 999px; font-size: 11.5px;
+    background: none; border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+  }
+  .conts button:hover { color: var(--text); border-color: var(--line-2); }
+  .conts button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: rgba(59, 130, 246, .10); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .search { padding: 8px; border-bottom: 1px solid var(--line); }
+  .search input {
+    width: 100%; padding: 6px 9px; border-radius: 6px;
+    background: var(--panel-2); border: 1px solid var(--line); outline: none;
+  }
+  .search input:focus { border-color: var(--accent); }
+  .search input::placeholder { color: var(--faint); }
+  .list {
+    list-style: none; margin: 0; padding: 4px; overflow-y: auto;
+    max-height: 140px; display: grid; grid-template-columns: 1fr 1fr; align-content: start;
+  }
+  @media (max-width: 420px) { .list { grid-template-columns: 1fr; } }
+  .list button {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 5px 8px; border: 0; border-radius: 5px; background: none;
+    color: var(--muted); text-align: left; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .list button:hover { background: var(--hover); color: var(--text); }
+  .list button[aria-current="true"] { color: var(--accent); background: rgba(59, 130, 246, .10); }
+  .list .empty { grid-column: 1 / -1; padding: 10px 8px; color: var(--faint); }
+  .count { padding: 6px 10px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11px; }
+  .list::-webkit-scrollbar { width: 8px; }
+  .list::-webkit-scrollbar-thumb { background: var(--hover-2); border-radius: 4px; }
+
+  /* 2026-11-15: phones and narrow windows (760 px and less). The header goes on two rows (settings and logo, then years and
+     timeline), the globe takes the top of the screen, and the trends, chart and crop detector sit in a sheet underneath that
+     scrolls as one. The country name stays in the corner box. */
+  @media (max-width: 760px) {
+    :root { --bar-h: 86px; --sheet-h: 46dvh; }
+    .bar { height: var(--bar-h); flex-wrap: wrap; align-content: center; row-gap: 6px; padding: 6px 8px; }
+    #pickerBtn { order: 1; }
+    .brand { order: 2; margin-left: auto; }
+    .brand .bt { height: 12px; }
+    .sel { display: none; }
+    .years { order: 3; }
+    .years > span:first-child { display: none; }
+    .timeline { order: 4; flex: 1 1 0; min-width: 0; }
+    #stage { inset: var(--bar-h) 0 var(--sheet-h) 0; }
+    .trends { top: auto; bottom: 0; left: 0; right: 0; width: auto; height: var(--sheet-h); display: block; overflow-y: auto;
+      border-left: 0; border-top: 1px solid var(--line-2); }
+    .trends .side-grip { display: none; }
+    .trends-body { overflow: visible; }
+    .coords { bottom: calc(var(--sheet-h) + 8px); left: 8px; min-width: 0; max-width: 62vw; font-size: 11px; }
+    .credits { display: none; }
+    .exit { left: auto; right: 8px; transform: none; bottom: calc(var(--sheet-h) + 10px); }   /* right of the country box, not on it */
+    .exag { left: 50%; top: calc(var(--bar-h) + 8px); }
+    .panel { top: calc(var(--bar-h) + 6px); max-height: calc(100dvh - var(--bar-h) - 16px); }
+    .bot-pop { padding-top: calc(var(--bar-h) + 10px); }
+  }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div class="tip" id="tip" hidden><b id="tipName"></b><span id="tipVal"></span></div>
+
+<header class="bar">
+  <button class="bar-btn" id="pickerBtn" aria-haspopup="true" aria-expanded="false" aria-controls="panel">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>
+    </svg>
+    Configuration
+    <svg class="caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+  </button>
+  <div class="years" role="group" aria-label="Year range">
+    <span>Years</span>
+    <select id="yFrom" aria-label="From year"></select>
+    <span aria-hidden="true">&ndash;</span>
+    <select id="yTo" aria-label="To year"></select>
+  </div>
+  <div class="timeline" role="group" aria-label="Timeline">
+    <button class="play" id="play" aria-label="Play">
+      <svg id="playIcon" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>
+    </button>
+    <span class="ends" id="tStart"></span>
+    <input type="range" id="tYear" min="1981" max="2025" step="1" value="2025" aria-label="Year">
+    <span class="ends" id="tEnd"></span>
+    <span class="yr" id="tYearOut"></span>
+  </div>
+  <div class="sel">
+    <span class="cont" id="selCont">All continents</span>
+    <span class="sep">/</span>
+    <b id="selName" class="none">No country selected</b>
+    <button class="clear" id="selClear" aria-label="Clear selection" title="Clear" hidden>&times;</button>
+  </div>
+  <!-- 2026-11-15: the team logo; a click switches between light and dark -->
+  <button class="brand" id="themeBtn" type="button" aria-label="EarthTREND. Switch to light mode" title="Switch to light mode">
+    <img class="logo" src="vendor/logo.jpg" alt="" width="30" height="30"><img class="bt bt-dark" src="vendor/wordmark-dark.png" alt="EarthTREND" width="262" height="32"><img class="bt bt-light" src="vendor/wordmark-light.png" alt="" width="262" height="32">
+  </button>
+</header>
+
+<div class="exag" id="exag" hidden>
+  <label for="exagInput">Elevation</label>
+  <input id="exagInput" type="range" min="1" max="100" step="1" value="30">
+  <output id="exagOut" for="exagInput">&times;30</output>
+</div>
+
+
+
+<aside class="trends" id="trends" aria-label="Trends">
+  <div class="side-grip" id="sideGrip" role="separator" aria-orientation="vertical" aria-label="Resize the trends panel" tabindex="0"></div>
+  <div class="trends-head">Trends</div>
+  <div class="trends-body">
+    <div class="tvars" id="tvars" role="group" aria-label="Trend"></div>
+    <div class="tshow" role="group" aria-label="Show as">
+      <button id="showChange" aria-pressed="true" title="Change since the start of the year range">Change</button>
+      <button id="showValue" aria-pressed="false" title="The value in that year">Value</button>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="tdetail" id="tdetail"></div>
+    <div class="tsrc" id="tsrc"></div>
+  </div>
+  <section class="tchart" id="tchart" aria-label="Yearly series of the selected country"></section>
+  <!-- 2026-11-15: crop detector, bottom right; drag its top edge to resize -->
+  <section class="cropbot" id="cropbot" aria-label="Crop detector">
+    <div class="crop-grip" id="cropGrip" role="separator" aria-orientation="horizontal" aria-label="Resize the crop detector" tabindex="0" title="Drag to resize, double-click to reset"></div>
+    <div class="crop-body" id="cropBody"></div>
+    <div class="tbot" id="tbot" hidden><button id="botExpand" title="The crop detector in full, with rain and air temperature">Expand</button></div>
+  </section>
+</aside>
+
+<div class="coords" id="coords" aria-live="polite">
+  <div id="pinRow">
+    <div class="row"><span class="k">Selected</span><b class="v" id="pinName"></b></div>
+    <div class="row"><span class="k"></span><span class="v" id="pinVal"></span></div>
+  </div>
+  <div class="row hint" id="pinHint">Click a country to select it</div>
+  <div class="row" id="ptrRow" hidden><span class="k">Pointer</span><span class="v" id="ptrVal"></span></div>
+</div>
+<div class="credits">&copy; 2026 Earth Trend Detective &middot; Data: NASA POWER (MERRA-2, CERES), NASA GIBS &middot; Borders: Natural Earth</div>
+
+<button class="exit" id="exitFocus" hidden>Exit focus <kbd>Esc</kbd></button>
+
+<div class="bot-pop" id="botPop" hidden role="dialog" aria-modal="true" aria-labelledby="botTitle"><div class="bot-sheet" id="botSheet"></div></div>   <!-- 2026-11-15 -->
+
+<div class="panel" id="panel" hidden>
+  <div class="sec-title">World view</div>
+  <div class="modes" id="modes" role="group" aria-label="World view"></div>
+  <div class="opts">
+    <button class="switch" id="spinBtn" role="switch" aria-checked="true">Earth Spin<span class="track" aria-hidden="true"></span></button>
+  </div>
+  <div class="sec-title">Region</div>
+  <div class="conts" id="conts"></div>
+  <div class="search"><input id="search" type="search" placeholder="Search country" autocomplete="off"></div>
+  <ul class="list" id="list"></ul>
+  <div class="count" id="count"></div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="vendor/countries.js"></script>
+<script src="vendor/trends.js"></script>
+<script src="vendor/trends-land.js"></script>
+<script src="vendor/temp-5deg.js"></script>
+<script src="vendor/rain-5deg.js"></script>      <!-- 2026-11-15: rain forecast (build-forecasts.py) -->
+<script src="vendor/temp-upcoming.js"></script>  <!-- 2026-11-15: second temperature forecast (build-forecasts.py) -->
+<script src="vendor/forecast-trends.js"></script>
+<script src="vendor/cropbot.js"></script>       <!-- 2026-11-15: crop detector, bottom-right panel (build-cropbot.mjs) --> <!-- 2026-11-15: each cell's forecast trend, shown in forecast years (build-forecasts.py) -->
+<script>
+(function () {
+  'use strict';
+
+  const countries = window.COUNTRIES;               // [{ n: name, c: continent, a: ISO3, p: [polygon[ring[[lon,lat]]]] }]
+  const N = countries.length;
+  const D2R = Math.PI / 180;
+
+  const CONTINENTS = {
+    'Africa':        { h: 36,  s: 62, center: [20, 5] },
+    'Antarctica':    { h: 210, s: 12, center: [0, -78] },
+    'Asia':          { h: 12,  s: 62, center: [90, 38] },
+    'Europe':        { h: 212, s: 58, center: [15, 52] },
+    'North America': { h: 150, s: 38, center: [-100, 45] },
+    'Oceania':       { h: 285, s: 45, center: [140, -25] },
+    'South America': { h: 72,  s: 50, center: [-60, -16] }
+  };
+  const OTHER = { h: 190, s: 20 };
+
+  // View modes. `needs` = texture files under vendor/textures/ the mode uses.
+  const MODES = [
+    { key: 'sat',      label: 'Satellite',      id: 0, needs: ['day'],           title: 'Daytime satellite texture (Blue Marble)' },
+    { key: 'relief',   label: 'Relief',         id: 1, needs: ['day', 'topo'],   title: 'Satellite texture with elevation shading' },
+    { key: 'relief3d', label: '3D relief',      id: 7, needs: ['day', 'topo'],   title: 'Real elevations raised in 3D, with adjustable exaggeration' },
+    { key: 'digital',  label: 'Digital relief', id: 2, needs: ['topo', 'water'], title: 'Elevation as colours, no 3D shading' },
+    { key: 'night',    label: 'Night',          id: 3, needs: ['night'],         title: 'City lights' },
+    { key: 'water',    label: 'Water/land',     id: 5, needs: [],                title: 'Sea and land only, the land in plain white' }
+  ];
+  const LOADING_MODE = 6;   // plain country shapes, shown only until the first texture has loaded
+
+  // Elevation map: grey 0..255 is linear 0..6400 m (checked against Tibet, Denver, Ankara).
+  // Peaks are smoothed by the ~20 km pixels; the ocean floor is not included.
+  const TOPO_MAX_M = 6400, EARTH_R_M = 6371000;
+
+  // ---------- geometry helpers ----------
+  function tracePolys(ctx, polys, sx, sy) {
+    ctx.beginPath();
+    for (const poly of polys) {
+      for (const ring of poly) {
+        ring.forEach(([lon, lat], k) => {
+          const x = (lon + 180) * sx, y = (90 - lat) * sy;
+          k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        });
+        ctx.closePath();
+      }
+    }
+  }
+
+  // unit vector for lon/lat in globe space (matches the sphere's texture mapping)
+  function dirOf(lon, lat) {
+    const l = lon * D2R, p = lat * D2R;
+    return new THREE.Vector3(Math.cos(p) * Math.cos(l), Math.sin(p), -Math.cos(p) * Math.sin(l));
+  }
+  // a ring edge that only cuts the data (along the 180-degree meridian, where land is split at the date line, or
+  // along a pole), not a real coast or border: never drawn as a line
+  const isCut = (a, b) => (a[0] === b[0] && Math.abs(a[0]) === 180) || (Math.abs(a[1]) > 89.9 && Math.abs(b[1]) > 89.9);
+
+  // Centre of each country = area centroid of its largest outer ring.
+  const ringArea = r => { let a = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += r[j][0] * r[i][1] - r[i][0] * r[j][1]; return Math.abs(a / 2); };
+  countries.forEach(c => {
+    let bestA = 0, best = [0, 0];
+    for (const poly of c.p) {
+      const r = poly[0];
+      let a = 0, cx = 0, cy = 0;
+      for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+        const f = r[j][0] * r[i][1] - r[i][0] * r[j][1];
+        a += f; cx += (r[j][0] + r[i][0]) * f; cy += (r[j][1] + r[i][1]) * f;
+      }
+      if (Math.abs(a) > bestA) { bestA = Math.abs(a); best = [cx / (3 * a), cy / (3 * a)]; }
+    }
+    c.center = best;
+    // land that goes round a pole (Antarctica): centred on the pole, and its 2D map is a polar one (section 8)
+    for (const poly of c.p) for (const p of poly[0]) if (Math.abs(p[1]) > 89.9) c.polar = Math.sign(p[1]);
+    if (c.polar) { c.center = [0, c.polar * 90]; return; }   // longitude 0 at the top of its map
+    if (c.p.length < 2) return;
+    // a country in several parts (islands, exclaves, archipelagos): its 2D map shows all of them, framed around
+    // their middle. Parts further than 3 times the main landmass's size (at least 30 degrees) are left out:
+    // far-off overseas lands (French Guiana, Reunion, the Caribbean Netherlands) would shrink the country to a dot.
+    const up = dirOf(...best);
+    let main = null, mainA = 0;
+    for (const poly of c.p) { const A = ringArea(poly[0]); if (A > mainA) { mainA = A; main = poly; } }
+    let minDot = 1;
+    for (const p of main[0]) minDot = Math.min(minDot, up.dot(dirOf(p[0], p[1])));
+    const reach = Math.cos(Math.min(Math.PI, Math.max(Math.acos(Math.min(1, minDot)) * 3, 30 * D2R)));
+    c.frame = c.p.filter(poly => poly === main || poly[0].every(p => up.dot(dirOf(p[0], p[1])) >= reach));
+    if (c.frame.length < 2) return;
+    let lo0 = 999, lo1 = -999, la0 = 99, la1 = -99;      // their box, longitudes unwrapped around the main part
+    for (const poly of c.frame) for (const [lon, lat] of poly[0]) {
+      let x = lon;
+      while (x - best[0] > 180) x -= 360;
+      while (x - best[0] < -180) x += 360;
+      lo0 = Math.min(lo0, x); lo1 = Math.max(lo1, x); la0 = Math.min(la0, lat); la1 = Math.max(la1, lat);
+    }
+    let cx = (lo0 + lo1) / 2;
+    if (cx > 180) cx -= 360; else if (cx < -180) cx += 360;
+    c.center = [cx, (la0 + la1) / 2];
+  });
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  const maxTex = renderer.capabilities.maxTextureSize;
+  const aniso = renderer.capabilities.getMaxAnisotropy();
+
+
+  // ---------- 2. id map: which country owns each pixel (hover, click, highlight) ----------
+  const ID_W = 4096, ID_H = 2048;
+  const check = (lo, hi) => (lo * 73 + hi * 151 + 29) & 255;   // checksum rejects antialiased edge pixels
+  const landData = new Uint8Array(ID_W * ID_H);          // how much of each pixel is land, 0..255 (antialiased)
+  const idData = (() => {
+    const cv = document.createElement('canvas');
+    cv.width = ID_W; cv.height = ID_H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    const sx = ID_W / 360, sy = ID_H / 180;
+    countries.forEach((c, i) => {
+      const id = i + 1;
+      ctx.fillStyle = `rgb(${id & 255},${id >> 8},${check(id & 255, id >> 8)})`;
+      tracePolys(ctx, c.p, sx, sy);
+      ctx.fill('evenodd');
+    });
+    const d = ctx.getImageData(0, 0, ID_W, ID_H).data;
+    let gaps = [];
+    for (let o = 0, p = 0; o < d.length; o += 4, p++) {
+      const a = d[o + 3], id = d[o] | (d[o + 1] << 8);
+      landData[p] = a;
+      if (a !== 255 || id < 1 || id > N || d[o + 2] !== check(d[o], d[o + 1])) {
+        d[o] = d[o + 1] = d[o + 2] = 0;
+        if (a >= 128) gaps.push(p);                     // an edge pixel that is mostly land
+      }
+      d[o + 3] = 255;
+    }
+    // edge pixels blended by the antialiasing take a neighbour's country, so nothing between countries is ownerless
+    for (let pass = 0; pass < 3 && gaps.length; pass++) {
+      const left = [], fills = [];
+      for (const p of gaps) {
+        let from = -1;
+        for (const q of [p - 1, p + 1, p - ID_W, p + ID_W]) {
+          if (q >= 0 && q < landData.length && (d[q * 4] | d[q * 4 + 1])) { from = q; break; }
+        }
+        if (from < 0) left.push(p); else fills.push(p, from);
+      }
+      for (let k = 0; k < fills.length; k += 2) {
+        d[fills[k] * 4] = d[fills[k + 1] * 4];
+        d[fills[k] * 4 + 1] = d[fills[k + 1] * 4 + 1];
+      }
+      gaps = left;
+    }
+    // 2026-11-15 (memory): keep only the country number, 2 bytes per pixel (16.8 MB) instead of the canvas's 4 (33.5 MB);
+    // the shader reads its low byte as red and its high byte as green (alpha on WebGL1). The drawing canvas is freed now.
+    const ids = new Uint16Array(ID_W * ID_H);
+    for (let o = 0, p = 0; p < ids.length; o += 4, p++) ids[p] = d[o] | (d[o + 1] << 8);
+    cv.width = cv.height = 0;
+    return ids;
+  })();
+
+  function idAt(u, v) {
+    const x = Math.min(ID_W - 1, Math.floor(u * ID_W));
+    const y = Math.min(ID_H - 1, Math.floor((1 - v) * ID_H));
+    return idData[y * ID_W + x] - 1;                    // -1 = ocean
+  }
+
+  // ---------- 3. textures ----------
+  function dataTex(data, w, h) {
+    const t = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    t.needsUpdate = true;
+    return t;
+  }
+  const blank = dataTex(new Uint8Array([0, 0, 0, 255]), 1, 1);
+
+  // 2026-11-15 (memory): the 2-byte id map goes to the GPU as is (red = low byte, green = high byte; WebGL1: luminance + alpha)
+  const ID_HI = renderer.capabilities.isWebGL2 ? 'g' : 'a';
+  const idTex = new THREE.DataTexture(new Uint8Array(idData.buffer), ID_W, ID_H, renderer.capabilities.isWebGL2 ? THREE.RGFormat : THREE.LuminanceAlphaFormat);
+  idTex.magFilter = idTex.minFilter = THREE.NearestFilter;
+  idTex.generateMipmaps = false;
+  idTex.unpackAlignment = 2;
+  idTex.needsUpdate = true;
+  // land coverage, smoothly filtered: the shader cuts it at one half, which gives a clean coastline at any zoom
+  function coverageTex(data, w, h) {
+    const t = new THREE.DataTexture(data, w, h, renderer.capabilities.isWebGL2 ? THREE.RedFormat : THREE.LuminanceFormat);
+    t.unpackAlignment = 1;
+    t.magFilter = THREE.LinearFilter;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.generateMipmaps = true;
+    t.needsUpdate = true;
+    return t;
+  }
+  let landTex = coverageTex(landData, ID_W, ID_H);
+
+  // per-country trend colour, written by section 11
+  const trendData = new Uint8Array(512 * 4);
+  const FIELD_W = 1080, FIELD_H = 540;                // 1/3-degree pixels
+  const fieldCv = document.createElement('canvas');
+  fieldCv.width = FIELD_W; fieldCv.height = FIELD_H;
+  const fieldTex = new THREE.CanvasTexture(fieldCv);
+  fieldTex.generateMipmaps = false;
+  fieldTex.minFilter = fieldTex.magFilter = THREE.LinearFilter;
+
+  // per-country state: r = dimmed, g = hovered, b = selected
+  const STATE_W = 512;
+  const stateData = new Uint8Array(STATE_W * 4);
+  const stateTex = dataTex(stateData, STATE_W, 1);
+  const trendTex = dataTex(trendData, STATE_W, 1);
+
+  // Texture files are JS files holding data: URLs, so the page also works opened straight from disk.
+  const loaded = {};
+  function loadScript(src) {
+    return new Promise((ok, fail) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = () => { s.remove(); ok(); }; s.onerror = () => fail(new Error('Could not load ' + src));   // 2026-11-15 (memory): the tag goes once run, so its text can be freed
+      document.head.appendChild(s);
+    });
+  }
+  function loadImage(key) {
+    if (!loaded[key]) {
+      loaded[key] = loadScript(`vendor/textures/${key}.js`).then(() => new Promise((ok, fail) => {
+        const img = new Image();
+        img.onload = () => { delete window.EARTH_TEX[key]; ok(img); };   // 2026-11-15 (memory): the text copy is not needed once decoded
+        img.onerror = fail;
+        img.src = window.EARTH_TEX[key];
+      }));
+    }
+    return loaded[key];
+  }
+  function toTexture(src) {
+    const t = new THREE.Texture(src);
+    t.anisotropy = aniso;
+    t.needsUpdate = true;
+    return t;
+  }
+
+  // Digital relief: colour the elevation map with a hypsometric ramp (flat, no shading).
+  function buildHypso(topo, water) {
+    const W = topo.width, H = topo.height;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(water, 0, 0, W, H);
+    const wd = ctx.getImageData(0, 0, W, H).data;
+    ctx.drawImage(topo, 0, 0, W, H);
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    const ramp = [
+      [0.00, [62, 122, 74]], [0.06, [110, 152, 84]], [0.16, [178, 186, 110]], [0.30, [205, 170, 112]],
+      [0.48, [168, 120, 82]], [0.66, [128, 96, 78]], [0.84, [200, 192, 184]], [1.00, [250, 250, 250]]
+    ];
+    const lut = new Uint8Array(256 * 3);
+    for (let v = 0; v < 256; v++) {
+      const h = v / 255;
+      let k = 0;
+      while (k < ramp.length - 2 && h > ramp[k + 1][0]) k++;
+      const [h0, c0] = ramp[k], [h1, c1] = ramp[k + 1];
+      const t = Math.min(1, Math.max(0, (h - h0) / (h1 - h0)));
+      for (let j = 0; j < 3; j++) lut[v * 3 + j] = c0[j] + (c1[j] - c0[j]) * t;
+    }
+    for (let o = 0; o < d.length; o += 4) {
+      if (wd[o] > 128) { d[o] = 24; d[o + 1] = 62; d[o + 2] = 104; }          // water
+      else { const v = d[o]; d[o] = lut[v * 3]; d[o + 1] = lut[v * 3 + 1]; d[o + 2] = lut[v * 3 + 2]; }
+      d[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return cv;
+  }
+
+  // ---------- 4. globe ----------
+  const stage = document.getElementById('stage');
+  stage.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
+  camera.position.set(0, 0, 3.4);
+  let camDist = 3.4;                 // camera distance from the globe centre
+
+  const uniforms = {
+    mode: { value: LOADING_MODE },
+    dayTex: { value: blank }, nightTex: { value: blank }, topoTex: { value: blank },
+    waterTex: { value: blank }, hypsoTex: { value: blank },
+    idTex: { value: idTex }, landTex: { value: landTex }, stateTex: { value: stateTex },
+    topoTexel: { value: new THREE.Vector2(1 / 2048, 1 / 1024) },
+    accent: { value: new THREE.Color('#3b82f6') },
+    exag: { value: 0 },          // 3D relief: globe radii per unit of the elevation map
+    bumpK: { value: 16 },        // strength of the elevation shading
+    holeId: { value: 0 },        // country (index + 1) that has been lifted out of the globe
+    holeAmt: { value: 0 },
+    isCap: { value: 0 },         // 1 on the lifted country's top
+    flatten: { value: 0 },       // lifted top: 0 = curved like the globe, 1 = flat 2D map
+    hiA: { value: blank }, hiB: { value: blank },     // lifted country: sharp NASA GIBS images
+    hiBox: { value: new THREE.Vector4(0, 0, 1, 1) },  // their area in globe uv (u0, v0, du, dv)
+    hiOn: { value: 0 },
+    trendTex: { value: trendTex }, // per-country trend colour (alpha 0 = no data)
+    trendOn: { value: 0 },
+    fieldTex: { value: fieldTex }, // continuous trend field over the land (section 11)
+    fieldOn: { value: 0 },
+    hrTex: { value: blank },       // trend map on 5-degree cells, one texel per cell (section 11)
+    hrOn: { value: 0 },
+    // lifted country with a trend: its own values on their data grid, coloured in steps over its own range (section 11)
+    locTex: { value: blank }, locLut: { value: blank }, locBands: { value: 1 },
+    locMix: { value: 0 },                                // 0 = the globe's smooth colours, 1 = its own steps (eased)
+    locGrid: { value: new THREE.Vector4(0, 0, 1, 1) },   // centre of texel 0 (lon, lat) and grid step (degrees)
+    locSize: { value: new THREE.Vector2(1, 1) },         // texels across, up-down
+    dimAmt: { value: 0 }         // darkens the globe while a country is lifted
+  };
+
+  const vertexShader = `
+    attribute vec3 flatPos;                            // lifted top: its place on the flat 2D map
+    uniform float isCap, mode, exag, flatten;
+    uniform vec3 capUp;
+    uniform float capRelief;
+    uniform sampler2D topoTex;
+    varying vec2 vUv;
+    varying vec3 vN, vE, vNo, vViewPos;
+    void main() {
+      vUv = uv;
+      vec3 n = normalize(position);
+      vec3 e = vec3(n.z, 0.0, -n.x);                   // east (direction of increasing longitude)
+      e = length(e) < 1e-4 ? vec3(0.0, 0.0, -1.0) : normalize(e);
+      vN = normalize(normalMatrix * n);
+      vE = normalize(normalMatrix * e);
+      vNo = normalize(normalMatrix * cross(n, e));     // north
+      vec3 p = position;
+      if (isCap > 0.5) {
+        p = mix(position, flatPos, flatten);
+        if (mode > 6.5) p += normalize(mix(n, capUp, flatten)) * texture2D(topoTex, uv).r * exag * mix(1.0, capRelief, flatten);   // 3D relief
+      }
+      else if (mode > 6.5) p *= 1.0 + texture2D(topoTex, uv).r * exag;   // 3D relief
+      vec4 mvp = modelViewMatrix * vec4(p, 1.0);
+      vViewPos = mvp.xyz;
+      gl_Position = projectionMatrix * mvp;
+    }`;
+
+  const fragmentShader = `
+    precision highp float;
+    uniform float mode, isCap, bumpK, holeId, holeAmt, dimAmt, hiOn, trendOn, fieldOn, hrOn, locMix, locBands;
+    uniform sampler2D locTex, locLut;
+    uniform vec4 locGrid;
+    uniform vec2 locSize;
+    varying vec3 vViewPos;
+    uniform sampler2D dayTex, nightTex, topoTex, waterTex, hypsoTex, idTex, landTex, stateTex, hiA, hiB, trendTex, fieldTex, hrTex;
+    uniform vec4 hiBox;
+    uniform vec2 topoTexel;
+    uniform vec3 accent;
+    varying vec2 vUv;
+    varying vec3 vN, vE, vNo;
+
+    const vec2 ID_SIZE = vec2(${ID_W}.0, ${ID_H}.0);
+    const vec3 SEA = vec3(0.027, 0.043, 0.075), NODATA = vec3(0.16, 0.19, 0.24);
+    // the globe's own day texture has snow and ice; the sharp NASA GIBS image (one summer composite) does not.
+    // Where the globe is snowy, its colour wins, so the season does not jump when a country is lifted.
+    vec3 keepSnow(vec3 sharp) {
+      vec3 base = texture2D(dayTex, vUv).rgb;
+      float mx = max(base.r, max(base.g, base.b)), mn = min(base.r, min(base.g, base.b));
+      float snow = smoothstep(0.52, 0.72, mx) * (1.0 - smoothstep(0.10, 0.24, (mx - mn) / max(mx, 0.001)));
+      return mix(sharp, base, snow);
+    }
+    // smooth cubic B-spline sampling of a small texture (4 bilinear reads): no hard edges between cells
+    vec4 cubicW(float v) {
+      vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v, s = n * n * n;
+      float x = s.x, y = s.y - 4.0 * s.x, z = s.z - 4.0 * s.y + 6.0 * s.x;
+      return vec4(x, y, z, 6.0 - x - y - z) / 6.0;
+    }
+    vec4 smoothCells(sampler2D t, vec2 uv, vec2 size) {
+      vec2 p = uv * size - 0.5, f = fract(p);
+      p -= f;
+      vec4 xc = cubicW(f.x), yc = cubicW(f.y);
+      vec4 c = p.xxyy + vec2(-0.5, 1.5).xyxy;
+      vec4 sw = vec4(xc.xz + xc.yw, yc.xz + yc.yw);
+      vec4 o = (c + vec4(xc.yw, yc.yw) / sw) / size.xxyy;
+      vec4 a = texture2D(t, o.xz), b = texture2D(t, o.yz), cc = texture2D(t, o.xw), d = texture2D(t, o.yw);
+      float sx = sw.x / (sw.x + sw.y), sy = sw.z / (sw.z + sw.w);
+      return mix(mix(d, cc, sx), mix(b, a, sx), sy);
+    }
+    // Lifted country with a trend: the data's own cells, joined by a Catmull-Rom curve (it goes through every
+    // cell's value, so the differences between regions keep their full size, and it bends smoothly, so no squares),
+    // then coloured in steps; the step edges are smooth curves, antialiased, with a faint line along them.
+    float locVal(vec2 ij) {                             // texel -> 0..1 over the country's range (16 bits in r, g)
+      ij.x = mod(ij.x, locSize.x);
+      ij.y = clamp(ij.y, 0.0, locSize.y - 1.0);
+      vec4 t = texture2D(locTex, (ij + 0.5) / locSize);
+      return (t.r * 65280.0 + t.g * 255.0) / 65535.0;
+    }
+    vec4 crW(float t) {
+      float t2 = t * t, t3 = t2 * t;
+      return vec4(-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2);
+    }
+    float locField(vec2 uv) {
+      vec2 p = (vec2(uv.x * 360.0 - 180.0, uv.y * 180.0 - 90.0) - locGrid.xy) / locGrid.zw;
+      vec2 i = floor(p), f = p - i;
+      vec4 wx = crW(f.x), wy = crW(f.y);
+      float r0 = 0.0, r1 = 0.0, r2 = 0.0, r3 = 0.0;
+      for (int x = 0; x < 4; x++) {
+        float w = x == 0 ? wx.x : x == 1 ? wx.y : x == 2 ? wx.z : wx.w, xi = i.x + float(x) - 1.0;
+        r0 += w * locVal(vec2(xi, i.y - 1.0)); r1 += w * locVal(vec2(xi, i.y));
+        r2 += w * locVal(vec2(xi, i.y + 1.0)); r3 += w * locVal(vec2(xi, i.y + 2.0));
+      }
+      return clamp(dot(wy, vec4(r0, r1, r2, r3)), 0.0, 1.0);
+    }
+    vec3 locColor(float n) {
+      float b = n * locBands, w = max(fwidth(b), 1e-4);
+      float k = floor(b + 0.5);                         // nearest step edge
+      vec3 c0 = texture2D(locLut, vec2((clamp(k - 1.0, 0.0, locBands - 1.0) + 0.5) / 16.0, 0.5)).rgb;
+      vec3 c1 = texture2D(locLut, vec2((clamp(k, 0.0, locBands - 1.0) + 0.5) / 16.0, 0.5)).rgb;
+      vec3 c = mix(c0, c1, clamp((b - k) / w + 0.5, 0.0, 1.0));
+      if (k > 0.5 && k < locBands - 0.5) c *= 1.0 - 0.16 * (1.0 - smoothstep(0.0, 1.2, abs(b - k) / w));
+      return c;
+    }
+    float idRaw(vec2 st) {
+      vec4 p = texture2D(idTex, st);
+      return floor(p.r * 255.0 + 0.5) + floor(p.${ID_HI} * 255.0 + 0.5) * 256.0;
+    }
+    vec4 stateOf(float id) { return texture2D(stateTex, vec2((id - 0.5) / ${STATE_W}.0, 0.5)); }
+
+    void main() {
+      vec2 st = vec2(vUv.x, 1.0 - vUv.y);
+
+      // land or sea: the antialiased coverage cut at one half, about a screen pixel soft, never stair-stepped
+      float lc = texture2D(landTex, st).r;
+      float lw = max(fwidth(lc) * 0.75, 0.001);
+      float land = isCap > 0.5 ? 1.0 : smoothstep(0.5 - lw, 0.5 + lw, lc);
+
+      // country: the four id pixels around this point vote with bilinear weights, so the edge between two
+      // countries is a smooth curve too
+      vec2 ip = st * ID_SIZE - 0.5, f = fract(ip), b0 = (floor(ip) + 0.5) / ID_SIZE, tx = 1.0 / ID_SIZE;
+      float ia = idRaw(b0), ib = idRaw(b0 + vec2(tx.x, 0.0)), ic = idRaw(b0 + vec2(0.0, tx.y)), idd = idRaw(b0 + tx);
+      float wa = (1.0 - f.x) * (1.0 - f.y), wb = f.x * (1.0 - f.y), wc = (1.0 - f.x) * f.y, wd = f.x * f.y;
+      float sa = ia < 0.5 ? 0.0 : wa + (ib == ia ? wb : 0.0) + (ic == ia ? wc : 0.0) + (idd == ia ? wd : 0.0);
+      float sb = ib < 0.5 ? 0.0 : wb + (ia == ib ? wa : 0.0) + (ic == ib ? wc : 0.0) + (idd == ib ? wd : 0.0);
+      float sc = ic < 0.5 ? 0.0 : wc + (ia == ic ? wa : 0.0) + (ib == ic ? wb : 0.0) + (idd == ic ? wd : 0.0);
+      float sd = idd < 0.5 ? 0.0 : wd + (ia == idd ? wa : 0.0) + (ib == idd ? wb : 0.0) + (ic == idd ? wc : 0.0);
+      float id = ia, best = sa;
+      if (sb > best) { id = ib; best = sb; }
+      if (sc > best) { id = ic; best = sc; }
+      if (sd > best) { id = idd; best = sd; }
+      if (best <= 0.0) id = 0.0;
+
+      int m = int(mode + 0.5);
+      vec3 col;
+
+      // lifted country: use the sharp images fetched for it, where they cover
+      vec2 huv = vec2(fract(vUv.x - hiBox.x), vUv.y - hiBox.y) / hiBox.zw;   // wraps across the date line
+      bool hi = isCap > 0.5 && hiOn > 0.5 && huv.x >= 0.0 && huv.y >= 0.0 && huv.x <= 1.0 && huv.y <= 1.0;
+
+      if (trendOn > 0.5) {                                // trend chosen: plain trend map, no texture
+        vec4 tc = id > 0.5 ? texture2D(trendTex, vec2((id - 0.5) / ${STATE_W}.0, 0.5)) : vec4(0.0);
+        vec3 lcol = tc.a > 0.5 ? tc.rgb : NODATA;         // by country, until the field is there
+        if (fieldOn > 0.5) {                              // one continuous field over the land
+          vec4 fc = texture2D(fieldTex, vUv);
+          lcol = mix(NODATA, fc.rgb, fc.a);
+          if (hrOn > 0.5) {                               // native grid on top: texel centres sit on the cell centres
+            vec4 hc = smoothCells(hrTex, vUv, vec2(72.0, 36.0));   // 5-degree cells, blended smoothly
+            lcol = mix(lcol, hc.rgb / max(hc.a, 0.001), hc.a);
+          }
+        }
+        if (isCap > 0.5 && locMix > 0.0) lcol = mix(lcol, locColor(locField(vUv)), locMix);   // lifted country: its own steps
+        col = mix(SEA, lcol, land);
+      } else if (m == 0) {                                // satellite
+        col = hi ? keepSnow(texture2D(hiA, huv).rgb) : texture2D(dayTex, vUv).rgb;
+      } else if ((m == 1 || m == 7) && hi) {              // relief, sharp: satellite x ASTER shaded relief
+        col = keepSnow(texture2D(hiA, huv).rgb);
+        float sh = texture2D(hiB, huv).r;
+        if (sh > 0.4) col *= clamp(sh / 0.58, 0.35, 1.7);
+      } else if (m == 1 || m == 7) {                      // relief / 3D relief: satellite + elevation shading
+        col = texture2D(dayTex, vUv).rgb;
+        float hL = texture2D(topoTex, vUv - vec2(topoTexel.x, 0.0)).r;
+        float hR = texture2D(topoTex, vUv + vec2(topoTexel.x, 0.0)).r;
+        float hD = texture2D(topoTex, vUv - vec2(0.0, topoTexel.y)).r;
+        float hU = texture2D(topoTex, vUv + vec2(0.0, topoTexel.y)).r;
+        vec3 n = normalize(normalize(vN) - bumpK * ((hR - hL) * normalize(vE) + (hU - hD) * normalize(vNo)));
+        vec3 L = normalize(vec3(-0.55, 0.6, 0.6));
+        col *= 0.38 + 0.82 * max(dot(n, L), 0.0);
+      } else if (m == 2) {                                // digital relief
+        col = texture2D(hypsoTex, vUv).rgb;
+        if (hi) {                                         // ASTER colour relief (cleared where it has no data)
+          vec4 c = texture2D(hiA, huv);
+          vec3 cc = c.rgb / max(c.a, 0.001);
+          if (min(cc.r, min(cc.g, cc.b)) < 0.96) col = mix(col, cc, smoothstep(0.25, 0.75, c.a));
+        }
+      } else if (m == 3) {                                // night lights
+        col = hi ? texture2D(hiA, huv).rgb : texture2D(nightTex, vUv).rgb;
+      } else if (m == 5) {                                // water / land: the sea, and the land plain white
+        col = mix(vec3(0.09, 0.25, 0.40), vec3(0.97), land);
+      } else {                                            // loading: plain country shapes
+        col = mix(SEA, vec3(0.12, 0.16, 0.22), land);
+      }
+
+      if (isCap > 0.5) {                                  // lifted piece: plain texture, light hover
+        if (stateOf(id).g > 0.5) col = mix(col, vec3(1.0), 0.12);
+      } else if (id > 0.5) {                              // dimmed / selected / hovered country, and the empty socket
+        vec4 sv = stateOf(id);
+        vec3 k = col;
+        if (sv.r > 0.5) k = mix(k, vec3(0.10, 0.12, 0.16), 0.8);
+        if (sv.b > 0.5) k = mix(k, accent, 0.7);
+        if (sv.g > 0.5) k = mix(k, vec3(1.0), 0.25);
+        if (abs(id - holeId) < 0.5) k = mix(k, vec3(0.012, 0.018, 0.03), 0.92 * holeAmt);
+        col = mix(col, k, land);
+      }
+      if (isCap < 0.5) {
+        // atmosphere: towards the edge of the disc we look through more air, which turns the ground blue
+        float edge = 1.0 - max(dot(normalize(vN), normalize(-vViewPos)), 0.0);
+        col = mix(col, vec3(0.42, 0.66, 1.0), pow(edge, 3.2) * (trendOn > 0.5 ? 0.35 : 0.62));
+        col *= 1.0 - 0.4 * dimAmt;
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }`;
+
+  const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader, extensions: { derivatives: true } });
+  // 2026-11-15 (memory): a geometry that never changes and is never hit-tested needs its arrays only until the GPU has them
+  // (the globe is hit-tested as a sphere, the borders not at all)
+  function dropAfterUpload(geo) {
+    const drop = function () { this.array = null; };
+    for (const k in geo.attributes) geo.attributes[k].onUpload(drop);
+    if (geo.index) geo.index.onUpload(drop);
+  }
+  const globeGeo = new THREE.SphereGeometry(1, 160, 80);   // enough for flat textures
+  let globeGeo3d = null;                                    // dense mesh, made on first use of 3D relief
+  const globe = new THREE.Mesh(globeGeo, material);
+  globe.rotation.order = 'XYZ';
+  scene.add(globe);
+
+  // ---------- 4a. sky: distant stars and the glow of the atmosphere ----------
+  // The stars sit on a far sphere that turns with the globe, as if we were flying round the Earth. Most are faint,
+  // a few bright; more of them crowd along a tilted band (like the Milky Way). Now and then one brightens a little.
+  // The air is a thin blue rim just outside the globe, fading out over a few hundred kilometres.
+  const sky = (() => {
+    const N = 9000, R = 40;
+    const pos = new Float32Array(N * 3), col = new Float32Array(N * 3), info = new Float32Array(N * 4);
+    let seed = 20261114;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-9)) * Math.cos(2 * Math.PI * rnd());
+    const band = new THREE.Vector3(0.38, 0.80, 0.46).normalize(), v = new THREE.Vector3();
+    const tints = [[0.74, 0.84, 1.0], [0.88, 0.93, 1.0], [1.0, 1.0, 1.0], [1.0, 0.95, 0.86], [1.0, 0.84, 0.66]];
+    for (let k = 0; k < N; k++) {
+      const z = rnd() * 2 - 1, ph = rnd() * 2 * Math.PI, rr = Math.sqrt(1 - z * z);
+      v.set(rr * Math.cos(ph), z, rr * Math.sin(ph));
+      const inBand = k < N * 0.38;
+      if (inBand) {                                    // pull it towards the band, about 7 degrees wide
+        const d = v.dot(band), d2 = Math.max(-0.99, Math.min(0.99, gauss() * 0.12));
+        v.addScaledVector(band, -d);
+        if (v.lengthSq() < 1e-6) v.set(1, 0, 0);
+        v.normalize().multiplyScalar(Math.sqrt(1 - d2 * d2)).addScaledVector(band, d2);
+      }
+      pos[k * 3] = v.x * R; pos[k * 3 + 1] = v.y * R; pos[k * 3 + 2] = v.z * R;
+      const b = Math.pow(rnd(), inBand ? 7 : 5);         // brightness: mostly faint
+      const t = tints[Math.min(4, Math.floor(Math.pow(rnd(), 1.4) * 5))];
+      col[k * 3] = t[0]; col[k * 3 + 1] = t[1]; col[k * 3 + 2] = t[2];
+      info[k * 4] = 2.0 + 2.6 * b;                       // size, css px
+      info[k * 4 + 1] = 0.30 + 0.70 * Math.sqrt(b);      // brightness
+      info[k * 4 + 2] = rnd() * 2 * Math.PI;             // twinkle phase
+      info[k * 4 + 3] = 0.25 + rnd() * 0.6;              // twinkle speed, radians a second
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('info', new THREE.BufferAttribute(info, 4));
+    const starU = { time: { value: 0 }, pr: { value: 1 } };
+    const stars = new THREE.Points(geo, new THREE.ShaderMaterial({
+      uniforms: starU,
+      vertexShader: `
+        attribute vec3 color;
+        attribute vec4 info;                             // size, brightness, twinkle phase, twinkle speed
+        uniform float time, pr;
+        varying vec3 vC;
+        varying float vA;
+        void main() {
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          // a slow wave raised to a high power: most of the time nothing, now and then a soft brightening
+          float tw = pow(0.5 + 0.5 * sin(time * info.w + info.z), 28.0);
+          float a = info.y * (0.9 + 0.1 * sin(time * info.w * 0.43 + info.z * 1.7)) + tw * 0.5 * (0.35 + info.y);
+          vA = min(a, 1.0);
+          vC = color;
+          gl_PointSize = info.x * pr * (1.0 + 0.3 * tw);
+        }`,
+      fragmentShader: `
+        varying vec3 vC;
+        varying float vA;
+        void main() {
+          vec2 d = gl_PointCoord - 0.5;
+          float g = exp(-dot(d, d) * 9.0);               // soft round dot
+          gl_FragColor = vec4(vC * vA * g, 1.0);
+        }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+    }));
+    stars.rotation.order = 'XYZ';
+    stars.renderOrder = -2;
+    stars.frustumCulled = false;
+    scene.add(stars);
+
+    // the air: drawn on the inside of a bigger sphere; each pixel looks along its sight line and glows by how close
+    // that line passes to the Earth (only the part beyond the edge shows; the globe hides the rest)
+    const glowU = { centre: { value: new THREE.Vector3() }, amt: { value: 1 } };
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(1.4, 96, 48), new THREE.ShaderMaterial({
+      uniforms: glowU,
+      vertexShader: `
+        varying vec3 vP;
+        void main() {
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vP = mv.xyz;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        uniform vec3 centre;
+        uniform float amt;
+        varying vec3 vP;
+        void main() {
+          vec3 d = normalize(vP);
+          float h = max(length(centre - d * dot(centre, d)) - 1.0, 0.0);   // height of the sight line above the ground
+          float g = exp(-h / 0.028) * 0.85 + exp(-h / 0.11) * 0.22;
+          vec3 c = mix(vec3(0.20, 0.42, 1.0), vec3(0.55, 0.78, 1.0), exp(-h / 0.025));
+          gl_FragColor = vec4(c * g * amt, 1.0);
+        }`,
+      side: THREE.BackSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+    }));
+    glow.renderOrder = -1;
+    scene.add(glow);
+
+    const calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return {
+      twinkles: !calm,
+      update(now) {
+        stars.rotation.x = globe.rotation.x;
+        stars.rotation.y = globe.rotation.y;
+        if (!calm) starU.time.value = now / 1000;
+        starU.pr.value = renderer.getPixelRatio();
+        glowU.centre.value.set(0, 0, -camera.position.z);    // the camera looks straight at the centre
+        glowU.amt.value = 1 - 0.45 * uniforms.dimAmt.value;
+      }
+    };
+  })();
+
+  // ---------- 4b. country borders: vector lines, sharp at any zoom, a fixed width on screen ----------
+  // Every border segment is a thin strip (4 vertices) widened in the vertex shader in screen pixels.
+  // Borders shared by two countries are drawn once. In 3D relief they ride on the raised terrain.
+  const borders = (() => {
+    const seen = new Set(), pa = [], pb = [], side = [], end = [], index = [];
+    const key = (a, b) => a[0].toFixed(3) + ',' + a[1].toFixed(3) + '|' + b[0].toFixed(3) + ',' + b[1].toFixed(3);
+    const push = (a, b) => {
+      const A = dirOf(a[0], a[1]), B = dirOf(b[0], b[1]), n = pa.length / 3;
+      for (const [sd, e] of [[-1, 0], [1, 0], [-1, 1], [1, 1]]) {
+        pa.push(A.x, A.y, A.z); pb.push(B.x, B.y, B.z); side.push(sd); end.push(e);
+      }
+      index.push(n, n + 1, n + 2, n + 1, n + 3, n + 2);
+    };
+    for (const c of countries) for (const poly of c.p) for (const ring of poly) {
+      for (let k = 0; k < ring.length; k++) {
+        const a = ring[k], b = ring[(k + 1) % ring.length];
+        if ((a[0] === b[0] && a[1] === b[1]) || isCut(a, b)) continue;
+        const k1 = key(a, b), k2 = key(b, a);
+        if (seen.has(k1) || seen.has(k2)) continue;
+        seen.add(k1);
+        // long edges are split so the line follows the curve of the globe
+        const m = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) / 0.5));
+        for (let q = 0; q < m; q++) {
+          const t0 = q / m, t1 = (q + 1) / m;
+          push([a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0], [a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1]);
+        }
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pa, 3));
+    geo.setAttribute('pb', new THREE.Float32BufferAttribute(pb, 3));
+    geo.setAttribute('side', new THREE.Float32BufferAttribute(side, 1));
+    geo.setAttribute('end', new THREE.Float32BufferAttribute(end, 1));
+    geo.setIndex(index);
+    dropAfterUpload(geo);                               // 2026-11-15 (memory): 12 MB
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        topoTex: uniforms.topoTex, exag: uniforms.exag, mode: uniforms.mode, dimAmt: uniforms.dimAmt,
+        res: { value: new THREE.Vector2(1, 1) }, width: { value: 1.4 },
+        color: { value: new THREE.Color(1, 1, 1) }, alpha: { value: 0.5 }
+      },
+      vertexShader: `
+        attribute vec3 pb;
+        attribute float side, end;
+        uniform sampler2D topoTex;
+        uniform float exag, mode, width;
+        uniform vec2 res;
+        vec3 lift(vec3 d) {
+          float r = 1.0006;
+          if (mode > 6.5) {                                 // 3D relief: on top of the raised ground
+            vec2 uv = vec2(atan(-d.z, d.x) / 6.2831853 + 0.5, asin(clamp(d.y, -1.0, 1.0)) / 3.1415927 + 0.5);
+            r += texture2D(topoTex, uv).r * exag + 0.0015;
+          }
+          return d * r;
+        }
+        void main() {
+          vec4 A = projectionMatrix * modelViewMatrix * vec4(lift(position), 1.0);
+          vec4 B = projectionMatrix * modelViewMatrix * vec4(lift(pb), 1.0);
+          vec2 d = (B.xy / B.w - A.xy / A.w) * res;
+          d = length(d) < 1e-6 ? vec2(1.0, 0.0) : normalize(d);
+          vec4 P = end < 0.5 ? A : B;
+          P.xy += vec2(-d.y, d.x) * side * 2.0 * width / res * P.w;
+          gl_Position = P;
+        }`,
+      fragmentShader: `
+        uniform vec3 color;
+        uniform float alpha, dimAmt;
+        void main() { gl_FragColor = vec4(color * (1.0 - 0.4 * dimAmt), alpha); }`,
+      transparent: true, depthWrite: false,
+      side: THREE.DoubleSide                            // strips face either way depending on the segment's direction
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 1;
+    globe.add(mesh);
+    return mat;
+  })();
+  // line colour and strength per view: light on imagery, dark on flat colours
+  function borderStyle() {
+    const u = borders.uniforms, m = uniforms.mode.value;
+    let c = [1, 1, 1], a;
+    if (uniforms.trendOn.value > 0.5) { if (uniforms.fieldOn.value > 0.5) a = 0.45; else { c = [0.02, 0.03, 0.06]; a = 0.9; } }
+    else if (m === 0) a = 0.55;
+    else if (m === 1 || m === 7) a = 0.5;
+    else if (m === 2) { c = [0.05, 0.06, 0.08]; a = 0.6; }
+    else if (m === 3) a = 0.35;
+    else if (m === 5) { c = [0.25, 0.24, 0.22]; a = 0.65; }
+    else { c = [0.02, 0.03, 0.06]; a = 0.9; }
+    u.color.value.setRGB(c[0], c[1], c[2]);
+    u.alpha.value = a;
+    const pr = renderer.getPixelRatio();
+    u.width.value = 0.75 * pr;                          // half-width in device pixels: lines about 1.5 px wide
+    u.res.value.set(renderer.domElement.width, renderer.domElement.height);
+  }
+
+  function resize() {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(() => { resize(); try { wake(); } catch (e) {} }).observe(stage);
+  resize();
+
+  // Sharper coastline: the same land coverage at twice the resolution, built in small steps while the page is idle.
+  // 2026-11-15 (memory): drawn in 4 bands of 1024 rows on a 33.5 MB canvas instead of one 134 MB canvas, and the 33.5 MB copy
+  // in the page is dropped once the GPU has it (the GPU keeps the texture)
+  // defined out here: a callback made inside the build would keep its 33.5 MB array alive
+  function dropTexData(t) { t.image.data = null; t.onUpdate = null; }
+  if (maxTex >= 8192) setTimeout(() => {
+    const W = 8192, H = 4096, BAND = 1024, cv = document.createElement('canvas');
+    cv.width = W; cv.height = BAND;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff';
+    const later = cb => (window.requestIdleCallback ? requestIdleCallback(cb, { timeout: 1000 }) : setTimeout(cb, 50));
+    const out = new Uint8Array(W * H);
+    // each country's latitude span, so a band draws only the countries that reach into it
+    const span = countries.map(c => { let lo = 90, hi = -90; for (const poly of c.p) for (const [, lat] of poly[0]) { if (lat < lo) lo = lat; if (lat > hi) hi = lat; } return [lo, hi]; });
+    let y0 = 0, y = 0, todo = [], ci = 0;
+    const band = () => {
+      const top = 90 - y0 * 180 / H, bot = 90 - (y0 + BAND) * 180 / H;
+      todo = []; for (let i = 0; i < N; i++) if (span[i][1] >= bot && span[i][0] <= top) todo.push(i);
+      ci = 0; y = 0;
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, BAND);
+      ctx.setTransform(1, 0, 0, 1, 0, -y0);
+      later(draw);
+    };
+    const strip = () => {
+      const h = 512, d = ctx.getImageData(0, y, W, h).data;
+      for (let i = 3, o = (y0 + y) * W; i < d.length; i += 4, o++) out[o] = d[i];
+      y += h;
+      if (y < BAND) { later(strip); return; }
+      y0 += BAND;
+      if (y0 < H) { band(); return; }
+      const old = landTex;
+      landTex = uniforms.landTex.value = coverageTex(out, W, H);
+      landTex.onUpdate = dropTexData;
+      old.dispose();
+      cv.width = cv.height = 0;
+    };
+    const draw = () => {
+      for (const end = Math.min(todo.length, ci + 30); ci < end; ci++) { tracePolys(ctx, countries[todo[ci]].p, W / 360, H / 180); ctx.fill('evenodd'); }
+      later(ci < todo.length ? draw : strip);
+    };
+    band();
+  }, 1500);
+
+  // ---------- 5. view modes ----------
+  const modesEl = document.getElementById('modes');
+  const exagEl = document.getElementById('exag');
+  const exagInput = document.getElementById('exagInput');
+  const exagOut = document.getElementById('exagOut');
+  let currentMode = null;
+
+  function applyExag() {
+    const x = +exagInput.value;
+    exagOut.textContent = '×' + x;
+    uniforms.exag.value = currentMode === 'relief3d' ? TOPO_MAX_M / EARTH_R_M * x : 0;
+    // shading follows the real slope at this exaggeration (map texel = 360°/2048)
+    uniforms.bumpK.value = currentMode === 'relief3d'
+      ? Math.max(4, TOPO_MAX_M / EARTH_R_M * x / (2 * Math.PI / 2048) * 1.4)
+      : 16;
+  }
+  exagInput.addEventListener('input', () => {
+    applyExag();
+    if (lifted && lifted.goal === 1) { camRate = CAM_RATE; targetZ = zoomedDistance(lifted); }
+  });
+
+  async function prepare(mode) {
+    const imgs = {};
+    for (const k of mode.needs) imgs[k] = await loadImage(k);
+    if (imgs.day && uniforms.dayTex.value === blank) uniforms.dayTex.value = toTexture(imgs.day);
+    if (imgs.night && uniforms.nightTex.value === blank) uniforms.nightTex.value = toTexture(imgs.night);
+    if (imgs.topo && uniforms.topoTex.value === blank) {
+      uniforms.topoTex.value = toTexture(imgs.topo);
+      uniforms.topoTexel.value.set(1 / imgs.topo.width, 1 / imgs.topo.height);
+    }
+    if (imgs.water && uniforms.waterTex.value === blank) uniforms.waterTex.value = toTexture(imgs.water);
+    if (mode.key === 'digital' && uniforms.hypsoTex.value === blank) {
+      uniforms.hypsoTex.value = toTexture(buildHypso(imgs.topo, imgs.water));
+    }
+  }
+
+  async function setMode(key) {
+    const mode = MODES.find(m => m.key === key);
+    currentMode = key;
+    const b = modesEl.querySelector(`[data-mode="${key}"]`);
+    modesEl.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    exagEl.hidden = key !== 'relief3d';
+    b.classList.add('loading');
+    try {
+      await prepare(mode);
+      if (currentMode === key) {
+        if (!window.__etReady) { window.__etReady = performance.now(); performance.mark('et-globe-ready'); startSpawn(); }   // 2026-11-15: first imagery on the globe (load timing), then the spawn
+        if (key === 'relief3d' && !globeGeo3d) { globeGeo3d = new THREE.SphereGeometry(1, 640, 320); globeGeo3d.computeBoundingSphere(); dropAfterUpload(globeGeo3d); }   // 2026-11-15 (memory): 11.5 MB
+        globe.geometry = key === 'relief3d' ? globeGeo3d : globeGeo;
+        uniforms.mode.value = mode.id; applyExag(); if (lifted) loadHi(lifted);
+      }   // ignore if the user already picked another
+    } catch (err) {
+      console.error(err);
+    } finally {
+      b.classList.remove('loading');
+    }
+  }
+
+  MODES.forEach(m => {
+    const b = document.createElement('button');
+    b.dataset.mode = m.key;
+    b.textContent = m.label;
+    b.title = m.title;
+    b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', () => setMode(m.key));
+    modesEl.appendChild(b);
+  });
+
+  // ---------- 6. selection state ----------
+  let hovered = -1, selected = -1, continent = null;
+
+  function setState(i, ch, on) {
+    if (i < 0) return;
+    stateData[i * 4 + ch] = on ? 255 : 0;
+    stateTex.needsUpdate = true;
+  }
+  let prefetchTimer = 0;
+  function setHover(i) {
+    if (i === hovered) return;
+    setState(hovered, 1, false); hovered = i; setState(hovered, 1, true);
+    // resting on a country: get its piece and sharp images ready before it is clicked
+    clearTimeout(prefetchTimer);
+    if (i >= 0) prefetchTimer = setTimeout(() => prefetch(i), 250);
+  }
+  function prefetch(i) {
+    const G = liftGeometry(i);                       // 2026-11-15: the piece is needed with a trend on too; only the images are not
+    if (uniforms.trendOn.value > 0.5) return;
+    (HI_LAYERS[uniforms.mode.value] || []).forEach(([l, f, ppd, gap]) => gibsTexture(l, f, ppd, G.box, gap).catch(() => {}));
+  }
+  function select(i) {
+    setState(selected, 2, false); selected = i; setState(selected, 2, true);
+    const name = document.getElementById('selName');
+    name.textContent = i < 0 ? 'No country selected' : countries[i].n;
+    name.classList.toggle('none', i < 0);
+    document.getElementById('selClear').hidden = i < 0;
+    showSelected(i);
+    if (i >= 0 && !focusMode) setZoom(1);    // each focus session starts at 1x
+    focusMode = i >= 0;
+    document.getElementById('exitFocus').hidden = !focusMode;
+    if (i >= 0) {
+      lookAt(...countries[i].center);        // focus: turn the country to the middle
+      lift(i);
+    } else putBack(true);
+    renderList();
+    renderTrendDetail();
+  }
+  function setContinent(k) {
+    continent = k;
+    document.getElementById('selCont').textContent = k || 'All continents';
+    countries.forEach((c, i) => setState(i, 0, k && c.c !== k));
+    if (k) { if (focusMode) select(-1); lookAt(...CONTINENTS[k].center); }
+    renderConts(); renderList();
+  }
+
+  // ---------- 7. camera / rotation ----------
+  // facing lon/lat: rotY = -(lon + 90°), rotX = lat
+  const view = { x: 20 * D2R, y: -(20 + 90) * D2R };
+  let target = null, vel = { x: 0, y: 0 };
+  const clampX = v => Math.max(-90 * D2R, Math.min(90 * D2R, v));
+
+  function lookAt(lon, lat) {
+    let ty = -(lon + 90) * D2R;
+    while (ty - view.y > Math.PI) ty -= 2 * Math.PI;
+    while (ty - view.y < -Math.PI) ty += 2 * Math.PI;
+    target = { x: clampX(lat * D2R), y: ty };
+    vel = { x: 0, y: 0 };
+  }
+
+  // ---------- 8. lifted country: out of the 3D globe, onto the screen as a 2D map ----------
+  // The selected country comes out of its own place (as in globe.gl's polygon altitude). The globe
+  // turns it to the centre, so its "up" points at the viewer; it rises out towards the screen and
+  // widens while the camera moves in, and on the way it flattens from the globe's curve into a flat,
+  // north-up 2D map. The globe stays behind, dimmed, with a dark gap where the country was.
+  const LIFT = 0.22;                 // how far the piece rises, in globe radii
+  const TILT = 38 * D2R;             // 3D relief: how far the 2D map leans back so its heights show
+  const GROW = 1.3;                  // and how much it widens around its own centre, to see it in detail
+  let lifted = null;                 // the rising country: { top, cap, outline, i, t, goal, fit, ... }
+  const returning = [];              // countries going back down
+  let zHome = null, targetZ = null;  // camera distance before focusing, and the zoom goal
+  const CAM_RATE = 7, CAM_RATE_FOCUS = 1.9;   // how fast the camera closes on its goal (per second): usual, moving in to a country
+  let camRate = CAM_RATE;
+
+  // Geometry of a country's lifting piece; built once per country and kept (a few at a time).
+  const geoCache = new Map();
+  function liftGeometry(i) {
+    let G = geoCache.get(i);
+    if (G) return G;
+    const c = countries[i];
+    const up = dirOf(...c.center);
+    // the parts the 2D map is framed on: all of a country in several parts (geometry helpers), or its one landmass
+    let shown = c.frame;
+    if (!shown) {
+      let big = c.p[0];
+      for (const poly of c.p) if (poly[0].length > big[0].length) big = poly;
+      shown = c.polar ? c.p : [big];
+    }
+    let fit = 0;
+    for (const poly of shown) for (const [lon, lat] of poly[0]) fit = Math.max(fit, up.angleTo(dirOf(lon, lat)));
+
+    // flat 2D map around the country's centre: north up, east right (on the plane touching the globe).
+    // Projection: Mercator, the one of everyday maps (Google Maps, OpenStreetMap, most world maps): shapes are
+    // true everywhere, and land far from the equator is drawn larger, as people are used to seeing it. Centred on
+    // the country and scaled by cos(centre latitude), so the middle of the map has the same size as on the globe.
+    // Land round a pole (Antarctica) instead gets a Lambert azimuthal equal-area map centred on the pole (the usual
+    // map of Antarctica); Mercator cannot show a pole at all.
+    const east = new THREE.Vector3(up.z, 0, -up.x);
+    if (east.lengthSq() < 1e-8) east.set(0, 0, -1);
+    east.normalize();
+    const north = new THREE.Vector3().crossVectors(up, east);
+    const lon0 = c.center[0], kx = Math.cos(c.center[1] * D2R);
+    const merc = lat => Math.log(Math.tan(Math.PI / 4 + Math.max(-85, Math.min(85, lat)) * D2R / 2));
+    const y0 = merc(c.center[1]);
+    const flatOf = (lon, lat, lift) => {
+      if (c.polar) {
+        // distance from the pole on the plane: 2 sin(c / 2), c = angle from the pole; direction = its longitude,
+        // the same way the meridians leave the pole on the globe
+        const l = lon * D2R, r = 2 * Math.sin((90 - c.polar * lat) * D2R / 2);
+        return [up.x * lift + r * Math.cos(l), up.y * lift, up.z * lift - r * Math.sin(l)];
+      }
+      let x = lon;
+      while (x - lon0 > 180) x -= 360;
+      while (x - lon0 < -180) x += 360;
+      const ex = (x - lon0) * D2R * kx, ny = (merc(lat) - y0) * kx;
+      return [up.x * lift + east.x * ex + north.x * ny,
+              up.y * lift + east.y * ex + north.y * ny,
+              up.z * lift + east.z * ex + north.z * ny];
+    };
+
+    const pos = [], flat = [], uv = [], idx = [], line = [], lineFlat = [];
+    const edge = c.polar ? 1.2 : Math.max(0.2, Math.min(2, fit / D2R * 2 / 90)), edge2 = edge * edge;   // mesh size, degrees
+    const OPEN = 2 * Math.PI - 1e-4;
+    const toP = !c.polar ? p => [p[0], p[1]] : ([lon, lat]) => {
+      const rr = 90 - c.polar * Math.max(-89.99, Math.min(89.99, lat)), t = (lon + 180) / 360 * OPEN;
+      return [rr * Math.cos(t), rr * Math.sin(t)];
+    };
+    const fromP = !c.polar ? p => p : ([x, y]) => {
+      let t = Math.atan2(y, x);
+      if (t < 0) t += 2 * Math.PI;
+      if (t > (OPEN + 2 * Math.PI) / 2) t -= 2 * Math.PI;   // inside the opened hair: the nearer side
+      return [Math.max(0, Math.min(OPEN, t)) / OPEN * 360 - 180, c.polar * (90 - Math.hypot(x, y))];
+    };
+
+    for (const poly of c.p) {
+      const rings = poly.map(r => {
+        const a = r.slice(), f = a[0], l = a[a.length - 1];
+        if (f[0] === l[0] && f[1] === l[1]) a.pop();
+        return a;
+      }).filter(r => r.length >= 3);
+      if (!rings.length) continue;
+
+      // top: triangulate in lon/lat, then split big triangles so it follows the globe's curve
+      const v2 = r => r.map(p => { const q = toP(p); return new THREE.Vector2(q[0], q[1]); });
+      const tris = THREE.ShapeUtils.triangulateShape(v2(rings[0]), rings.slice(1).map(v2));
+      const verts = [].concat(...rings).map(toP);
+      const mids = new Map();
+      const midpoint = (a, b) => {
+        const k = a < b ? a * 4194304 + b : b * 4194304 + a;   // 2026-11-15: a number key, not a string (faster, no garbage)
+        let m = mids.get(k);
+        if (m === undefined) {
+          m = verts.length;
+          verts.push([(verts[a][0] + verts[b][0]) / 2, (verts[a][1] + verts[b][1]) / 2]);
+          mids.set(k, m);
+        }
+        return m;
+      };
+      const d2 = (a, b) => (verts[a][0] - verts[b][0]) ** 2 + (verts[a][1] - verts[b][1]) ** 2;
+      const tri = [];
+      // 2026-11-15: split a triangle across its LONGEST edge only, until every edge is at most 'edge' (the same limit as before, so the
+      // piece follows the globe's curve as closely). Splitting into four every time multiplied the long thin triangles along the coasts:
+      // Russia had 612,000 triangles and took 2.3 s to build; this gives the same edge limit with a small fraction of them.
+      const split = (a, b, c2, depth) => {
+        const ab2 = d2(a, b), bc2 = d2(b, c2), ca2 = d2(c2, a);
+        if (depth > 40 || (ab2 <= edge2 && bc2 <= edge2 && ca2 <= edge2)) { tri.push(a, b, c2); return; }
+        if (ab2 >= bc2 && ab2 >= ca2) { const m = midpoint(a, b); split(a, m, c2, depth + 1); split(m, b, c2, depth + 1); }
+        else if (bc2 >= ca2) { const m = midpoint(b, c2); split(a, b, m, depth + 1); split(a, m, c2, depth + 1); }
+        else { const m = midpoint(c2, a); split(a, b, m, depth + 1); split(m, b, c2, depth + 1); }
+      };
+      tris.forEach(t => split(t[0], t[1], t[2], 0));
+
+      const base = pos.length / 3;
+      for (const v of verts) {
+        const [lon, lat] = fromP(v);
+        const g = dirOf(lon, lat);
+        pos.push(g.x, g.y, g.z);
+        flat.push(...flatOf(lon, lat, 1));
+        uv.push((lon + 180) / 360, (lat + 90) / 180);
+      }
+      for (const k of tri) idx.push(base + k);
+
+      // outline, a hair above the top so it never hides behind it
+      for (const ring of rings) {
+        for (let k = 0; k < ring.length; k++) {
+          const a = ring[k], b = ring[(k + 1) % ring.length];
+          if (isCut(a, b)) continue;
+          for (const pt of [a, b]) {
+            const g = dirOf(...pt).multiplyScalar(1.0015);
+            line.push(g.x, g.y, g.z);
+            lineFlat.push(...flatOf(pt[0], pt[1], 1.0015));
+          }
+        }
+      }
+    }
+
+
+    // area to fetch sharp images for: the framed parts, and other islands close to them (longitudes unwrapped
+    // around the centre)
+    const keep = Math.max(fit * 1.2, 12 * D2R);
+    let lo0 = 999, lo1 = -999, la0 = 99, la1 = -99;
+    for (const poly of c.p) {
+      if (!shown.includes(poly) && up.angleTo(dirOf(...poly[0][0])) > keep) continue;
+      for (const [lon, lat] of poly[0]) {
+        let x = lon;
+        while (x - c.center[0] > 180) x -= 360;
+        while (x - c.center[0] < -180) x += 360;
+        lo0 = Math.min(lo0, x); lo1 = Math.max(lo1, x); la0 = Math.min(la0, lat); la1 = Math.max(la1, lat);
+      }
+    }
+    // west edge kept in -180 .. 180; the east edge may pass 180 (the image is then fetched in two parts)
+    const pad = 0.5;
+    let w0 = lo0 - pad, e0 = lo1 + pad;
+    if (e0 - w0 >= 360) { w0 = -180; e0 = 180; }
+    else if (w0 < -180) { w0 += 360; e0 += 360; }
+    else if (w0 >= 180) { w0 -= 360; e0 -= 360; }
+    const box = [w0, Math.max(-90, la0 - pad), e0, Math.min(90, la1 + pad)];
+
+    // size of the flat 2D map (the framed parts), in globe radii: furthest point, half-width, half-height
+    let ext = 0, extX = 0, extY = 0;
+    for (const poly of shown) for (const [lon, lat] of poly[0]) {
+      const v = flatOf(lon, lat, 0);
+      ext = Math.max(ext, Math.hypot(v[0], v[1], v[2]));
+      extX = Math.max(extX, Math.abs(v[0] * east.x + v[1] * east.y + v[2] * east.z));
+      extY = Math.max(extY, Math.abs(v[0] * north.x + v[1] * north.y + v[2] * north.z));
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('flatPos', new THREE.Float32BufferAttribute(flat, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    // the same triangles laid flat: what the pointer is tested against once the country is a 2D map
+    const flatGeo = new THREE.BufferGeometry();
+    flatGeo.setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
+    flatGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    flatGeo.setIndex(idx);
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(line, 3));
+    lineGeo.setAttribute('flatPos', new THREE.Float32BufferAttribute(lineFlat, 3));
+    G = { geo, flatGeo, lineGeo, fit, ext, extX, extY, box, up };
+    geoCache.set(i, G);
+    if (geoCache.size > 12) {                         // forget the oldest one that is not on screen
+      for (const [k, old] of geoCache) {
+        if (k === i || (lifted && lifted.i === k) || returning.some(P => P.i === k)) continue;
+        geoCache.delete(k); old.geo.dispose(); old.flatGeo.dispose(); old.lineGeo.dispose();
+        break;
+      }
+    }
+    return G;
+  }
+
+  const HIT_MAT = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, visible: false });   // never drawn
+  function buildLift(i) {
+    const { geo, flatGeo, lineGeo, fit, ext, extX, extY, box, up } = liftGeometry(i);
+    const capRelief = 0.3 * ext / (TOPO_MAX_M / EARTH_R_M * 30);
+    const cap = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+      uniforms: Object.assign({}, uniforms, {
+        isCap: { value: 1 }, flatten: { value: 0 }, capUp: { value: up.clone() }, capRelief: { value: capRelief },
+        hiA: { value: blank }, hiB: { value: blank },
+        hiBox: { value: new THREE.Vector4(0, 0, 1, 1) }, hiOn: { value: 0 }
+      }),
+      vertexShader, fragmentShader, side: THREE.DoubleSide, extensions: { derivatives: true }
+    }));
+    const outline = new THREE.LineSegments(lineGeo, new THREE.ShaderMaterial({
+      uniforms: {
+        flatten: { value: 0 }, opacity: { value: 0 }, color: { value: new THREE.Color('#3b82f6') },
+        capUp: { value: up.clone() }, capRelief: { value: capRelief }, topoTex: uniforms.topoTex, exag: uniforms.exag, mode: uniforms.mode
+      },
+      vertexShader: `
+        attribute vec3 flatPos;
+        uniform float flatten, exag, mode, capRelief;
+        uniform vec3 capUp;
+        uniform sampler2D topoTex;
+        void main() {
+          vec3 p = mix(position, flatPos, flatten), d = normalize(position);
+          if (mode > 6.5) {
+            vec2 uv = vec2(atan(-d.z, d.x) / 6.2831853 + 0.5, asin(clamp(d.y, -1.0, 1.0)) / 3.1415927 + 0.5);
+            p += normalize(mix(d, capUp, flatten)) * (texture2D(topoTex, uv).r * exag * mix(1.0, capRelief, flatten) + 0.002);
+          }
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 color;
+        uniform float opacity;
+        void main() { gl_FragColor = vec4(color, opacity); }`,
+      transparent: true
+    }));
+    const top = new THREE.Group();
+    const hit = new THREE.Mesh(flatGeo, HIT_MAT);
+    top.add(cap, outline, hit);
+    globe.add(top);
+    top.matrixAutoUpdate = false;      // its matrix is set every frame (rise + widen)
+    return { top, cap, outline, hit, tilt: 0, i, t: 0, goal: 1, fit, ext, extX, extY, box, hiMode: null, up, spin0: spinAngle };
+  }
+
+  // Camera distance at which the flat 2D map fills ~80% of the view (moves out only for huge countries).
+  function focusDistance(P) {
+    const halfV = camera.fov / 2 * D2R;
+    const tv = Math.tan(halfV) * 0.82, th = tv * camera.aspect;   // 82% of the view, up-down and across
+    const R0 = 1 + LIFT + uniforms.exag.value;
+    const R = R0 + (currentMode === 'relief3d' ? R0 * GROW * P.ext * Math.sin(TILT) : 0);
+    const z = R + R0 * GROW * Math.max(P.extX / th, P.extY / tv);
+    return Math.max(R + 0.3, Math.min(6, z));
+  }
+
+  // Sharp images for the lifted country from NASA GIBS (needs internet; the globe's own textures
+  // are shown until they arrive, or if they can't be fetched).
+  const GIBS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
+  // [layer, format, most pixels per degree worth asking for (its native detail)]
+  const HI_LAYERS = {
+    0: [['BlueMarble_NextGeneration', 'image/jpeg', 222]],
+    1: [['BlueMarble_NextGeneration', 'image/jpeg', 222], ['ASTER_GDEM_Greyscale_Shaded_Relief', 'image/png', 444]],
+    7: [['BlueMarble_NextGeneration', 'image/jpeg', 222], ['ASTER_GDEM_Greyscale_Shaded_Relief', 'image/png', 444]],
+    2: [['ASTER_GDEM_Color_Shaded_Relief', 'image/png', 444, [77, 111, 146]]],   // to 83 N (SRTM stops at 60 N); + its "no data" colour
+    3: [['VIIRS_CityLights_2012', 'image/jpeg', 222]]     // water/land (5) needs none: its land is plain white
+  };
+  const HI_MAX_PX = Math.min(maxTex, 4096);
+  const hiCache = new Map();          // url -> Promise<THREE.Texture>, a few recent ones
+
+  // ASTER has no data in some 1-degree tiles (all of 180 W .. 179 W, a few coasts) and paints them in its water
+  // colour. A tile that is wholly that colour (within a few levels: smaller images come from a resampled level)
+  // but has land on our map is cleared, so the globe's own colour shows there instead of false water. Found on a
+  // small nearest-pixel copy (at most 12 samples per degree). Land colours are far from that blue.
+  function clearGaps(img, W, H, box, gap) {
+    const [w0, s0, e0, n0] = box, dw = e0 - w0, dh = n0 - s0;
+    const S = Math.max(3, Math.min(12, Math.floor(Math.sqrt(1.5e6 / (dw * dh)))));
+    const sw = Math.ceil(dw * S), sh = Math.ceil(dh * S);
+    const sc = document.createElement('canvas');
+    sc.width = sw; sc.height = sh;
+    const sg = sc.getContext('2d', { willReadFrequently: true });
+    sg.imageSmoothingEnabled = false;
+    sg.drawImage(img, 0, 0, sw, sh);
+    const px = sg.getImageData(0, 0, sw, sh).data;
+    const tx0 = Math.floor(w0), ty0 = Math.floor(s0), ntx = Math.ceil(e0) - tx0, nty = Math.ceil(n0) - ty0;
+    const seen = new Uint16Array(ntx * nty), data = new Uint8Array(ntx * nty);
+    const mx = 1.5 * dw / W, my = 1.5 * dh / H;        // keep 1.5 image pixels away from tile edges
+    for (let y = 0; y < sh; y++) {                     // rows run south to north (decoded flipped)
+      const lat = s0 + (y + 0.5) / sh * dh, fy = lat - Math.floor(lat);
+      if (fy < my || fy > 1 - my) continue;
+      const row = (Math.floor(lat) - ty0) * ntx;
+      for (let x = 0; x < sw; x++) {
+        const lon = w0 + (x + 0.5) / sw * dw, fx = lon - Math.floor(lon);
+        if (fx < mx || fx > 1 - mx) continue;
+        const k = row + Math.floor(lon) - tx0, o = (y * sw + x) * 4;
+        seen[k]++;
+        if (Math.abs(px[o] - gap[0]) > 12 || Math.abs(px[o + 1] - gap[1]) > 12 || Math.abs(px[o + 2] - gap[2]) > 12) data[k] = 1;
+      }
+    }
+    const cut = [];
+    for (let ty = 0; ty < nty; ty++) {
+      for (let tx = 0; tx < ntx; tx++) {
+        const k = ty * ntx + tx;
+        if (data[k] || seen[k] < 4) continue;
+        const lon0 = tx0 + tx, lat0 = ty0 + ty, L = ((lon0 + 180) % 360 + 360) % 360;
+        const c0 = Math.floor(L / 360 * ID_W), c1 = Math.floor((L + 1) / 360 * ID_W);
+        const r0 = Math.max(0, Math.floor((89 - lat0) / 180 * ID_H)), r1 = Math.min(ID_H, Math.floor((90 - lat0) / 180 * ID_H));
+        let land = false;
+        for (let r = r0; r < r1 && !land; r++) {
+          for (let c = c0; c < c1; c++) if (landData[r * ID_W + c % ID_W] >= 128) { land = true; break; }
+        }
+        if (land) cut.push([lon0, lat0]);
+      }
+    }
+    if (!cut.length) return img;
+    let cv = img;
+    if (!(img instanceof HTMLCanvasElement)) {
+      cv = document.createElement('canvas');
+      cv.width = W; cv.height = H;
+      cv.getContext('2d').drawImage(img, 0, 0);
+      img.close();
+    }
+    const g = cv.getContext('2d');
+    for (const [lon0, lat0] of cut) {
+      const x0 = Math.round((lon0 - w0) / dw * W), x1 = Math.round((lon0 + 1 - w0) / dw * W);
+      const y0 = Math.round((lat0 - s0) / dh * H), y1 = Math.round((lat0 + 1 - s0) / dh * H);
+      g.clearRect(x0, y0, x1 - x0, y1 - y0);
+    }
+    return cv;
+  }
+
+  function gibsTexture(layer, format, maxPpd, box, gap) {
+    const [w0, s0, e0, n0] = box;
+    const ppd = Math.min(maxPpd, HI_MAX_PX / (e0 - w0), HI_MAX_PX / (n0 - s0));   // pixels per degree
+    const W = Math.max(64, Math.round((e0 - w0) * ppd)), H = Math.max(64, Math.round((n0 - s0) * ppd));
+    const piece = (a, b, w) => GIBS + '?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=' + layer + '&STYLES=&CRS=EPSG:4326' +
+      '&BBOX=' + [s0, a, n0, b].join(',') + '&WIDTH=' + w + '&HEIGHT=' + H +
+      '&FORMAT=' + encodeURIComponent(format) + '&TRANSPARENT=TRUE';
+    // fetch + createImageBitmap decodes the image off the main thread
+    const get = u => fetch(u, { mode: 'cors' })
+      .then(r => { if (!r.ok) throw new Error('GIBS ' + r.status); return r.blob(); })
+      .then(b => createImageBitmap(b, { imageOrientation: 'flipY' }));
+    // past the date line: the part west of 180 and the part east of it, joined side by side
+    const W1 = e0 > 180 ? Math.max(1, Math.min(W - 1, Math.round((180 - w0) / (e0 - w0) * W))) : W;
+    const url = e0 > 180 ? piece(w0, 180, W1) + '|' + piece(-180, e0 - 360, W - W1) : piece(w0, e0, W);
+    if (!hiCache.has(url)) {
+      const image = e0 <= 180 ? get(url) : Promise.all([get(piece(w0, 180, W1)), get(piece(-180, e0 - 360, W - W1))])
+        .then(([a, b]) => {
+          const cv = document.createElement('canvas');
+          cv.width = W; cv.height = H;
+          const g = cv.getContext('2d');
+          g.drawImage(a, 0, 0, W1, H);
+          g.drawImage(b, W1, 0, W - W1, H);
+          a.close(); b.close();
+          return cv;
+        });
+      hiCache.set(url, image
+        .then(img => gap ? clearGaps(img, W, H, box, gap) : img)
+        .then(img => {
+          const t = new THREE.Texture(img);
+          t.flipY = false;                            // already flipped while decoding
+          t.anisotropy = aniso;
+          t.needsUpdate = true;
+          return t;
+        })
+        .catch(err => { hiCache.delete(url); throw new Error('GIBS image failed: ' + layer + ' (' + err.message + ')'); }));
+      while (hiCache.size > 8) {                      // drop the oldest
+        const [k, p] = hiCache.entries().next().value;
+        hiCache.delete(k);
+        p.then(t => t.dispose(), () => {});
+      }
+    }
+    return hiCache.get(url);
+  }
+
+  async function loadHi(P) {
+    const mode = uniforms.mode.value;
+    if (P.hiMode === mode) return;
+    P.hiMode = mode;
+    const u = P.cap.material.uniforms;
+    u.hiOn.value = 0;
+    const layers = HI_LAYERS[mode];
+    if (!layers || uniforms.trendOn.value > 0.5) { P.hiMode = null; return; }   // trend map needs no imagery
+    try {
+      const tex = await Promise.all(layers.map(([l, f, ppd, gap]) => gibsTexture(l, f, ppd, P.box, gap)));
+      if (P.hiMode !== mode) return;                  // mode changed meanwhile
+      const [w0, s0, e0, n0] = P.box;
+      u.hiA.value = tex[0];
+      u.hiB.value = tex[1] || blank;
+      u.hiBox.value.set((w0 + 180) / 360, (s0 + 90) / 180, (e0 - w0) / 360, (n0 - s0) / 180);
+      u.hiOn.value = 1;
+    } catch (err) {
+      console.warn(err.message, '- using the globe texture');
+    }
+  }
+
+  let focusMode = false;             // on while a country is selected; dragging then refocuses
+
+  // The country starts to come out at once while its sharp images are fetched (often already fetched while
+  // hovering). It rises, flattens and the camera moves in slowly (about two seconds), so the images are usually
+  // there before it has arrived; if not, they swap in when they come.
+  function lift(i) {
+    if (lifted && lifted.i === i) return;
+    if (lifted) { lifted.goal = 0; returning.push(lifted); }
+    const P = lifted = buildLift(i);
+    loadHi(P);
+    P.goal = 1;
+    if (zHome === null) zHome = camDist;
+    camRate = CAM_RATE_FOCUS;
+    targetZ = zoomedDistance(P);
+    refreshLocal();
+  }
+
+  // Focus zoom: 1x frames the whole country; more brings the camera closer to it.
+  const ZOOM_MIN = 1, ZOOM_MAX = 6;
+  let zoom = 1;
+  function zoomedDistance(P) {
+    const R = 1 + LIFT + uniforms.exag.value;
+    return Math.max(R + 0.04, R + (focusDistance(P) - R) / zoom);
+  }
+  function setZoom(z) {
+    zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    camRate = CAM_RATE;
+    if (lifted && lifted.goal === 1) targetZ = zoomedDistance(lifted);
+  }
+
+  // Send the country back down into its place; with restore, also the camera back to where it was.
+  function putBack(restore) {
+    if (lifted) { lifted.goal = 0; returning.push(lifted); lifted = null; refreshLocal(); }
+    if (restore && zHome !== null) { targetZ = zHome; zHome = null; camRate = CAM_RATE; }
+  }
+
+  const LIFT_TIME = 1.6, BACK_TIME = 0.55;   // seconds to come out, and to go back
+  const _tiltAxis = new THREE.Vector3(), _tiltRot = new THREE.Matrix4(), _tiltT = new THREE.Matrix4(), _tiltT2 = new THREE.Matrix4(), _spinRot = new THREE.Matrix4();
+  function animateLift(dt) {
+    let dim = 0;
+    const all = lifted ? returning.concat([lifted]) : returning;
+    for (const P of all) {
+      const step = dt / (P.goal > P.t ? LIFT_TIME : BACK_TIME);
+      P.t = P.goal > P.t ? Math.min(P.goal, P.t + step) : Math.max(P.goal, P.t - step);
+      const e = P.t < 0.5 ? 4 * P.t ** 3 : 1 - (-2 * P.t + 2) ** 3 / 2;   // ease in-out
+      const R = 1.002 + (LIFT + uniforms.exag.value) * e;     // rises out of its place towards the viewer
+      const G = 1 + (GROW - 1) * e;
+      // R * (G * I + (1 - G) * up up^T): out along "up" by R, wider by G across it
+      const u = P.up, k = 1 - G;
+      P.top.matrix.set(
+        R * (G + k * u.x * u.x), R * k * u.x * u.y, R * k * u.x * u.z, 0,
+        R * k * u.y * u.x, R * (G + k * u.y * u.y), R * k * u.y * u.z, 0,
+        R * k * u.z * u.x, R * k * u.z * u.y, R * (G + k * u.z * u.z), 0,
+        0, 0, 0, 1);
+      // first it comes out, then it flattens into the 2D map
+      let fl = Math.min(1, Math.max(0, (e - 0.15) / 0.85));
+      fl = fl * fl * (3 - 2 * fl);
+      // 3D relief: the flat map leans back about its east-west line (north away from the viewer), and comes out
+      // a bit further so its far edge stays in front of the globe
+      P.tilt += ((currentMode === 'relief3d' ? 1 : 0) - P.tilt) * (1 - Math.exp(-dt * 5));
+      const tl = P.tilt * fl;
+      if (tl > 1e-4) {
+        const push = R * GROW * P.ext * Math.sin(TILT) * tl;
+        _tiltAxis.set(0, 1, 0).cross(u).normalize();
+        _tiltRot.makeRotationAxis(_tiltAxis, -TILT * tl);       // negative: the north edge goes back
+        const c = R + push;
+        _tiltT.makeTranslation(u.x * c, u.y * c, u.z * c);
+        _tiltT.multiply(_tiltRot);
+        _tiltT.multiply(_tiltT2.makeTranslation(-u.x * R, -u.y * R, -u.z * R));
+        P.top.matrix.premultiply(_tiltT);
+      }
+      if (spinAngle !== P.spin0) P.top.matrix.premultiply(_spinRot.makeRotationY(-(spinAngle - P.spin0) * e));   // 2026-11-15: hold still while the Earth turns
+      P.top.matrixWorldNeedsUpdate = true;
+      P.cap.material.uniforms.flatten.value = fl;
+      P.outline.material.uniforms.flatten.value = fl;
+      P.outline.material.uniforms.opacity.value = 0.9 * Math.min(1, e * 3);
+      dim = Math.max(dim, e);
+    }
+    for (let k = returning.length - 1; k >= 0; k--) {
+      const P = returning[k];
+      if (P.t <= 0) {
+        globe.remove(P.top);
+        P.cap.material.dispose(); P.outline.material.dispose();   // geometry stays cached
+        returning.splice(k, 1);
+      }
+    }
+    // the empty socket on the globe follows the newest country
+    const hole = lifted || returning[returning.length - 1];
+    uniforms.holeId.value = hole ? hole.i + 1 : 0;
+    uniforms.holeAmt.value = hole ? Math.min(1, hole.t * 1.5) : 0;
+    uniforms.dimAmt.value = dim;
+
+    if (targetZ !== null) {
+      camDist += (targetZ - camDist) * (1 - Math.exp(-dt * camRate));
+      if (Math.abs(targetZ - camDist) < 1e-3) { camDist = targetZ; targetZ = null; }
+    }
+    camera.position.set(0, 0, camDist);     // always straight on
+  }
+
+  // ---------- 9. pointer ----------
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  const _inv = new THREE.Quaternion(), _sphere = new THREE.Sphere(new THREE.Vector3(), 1), _hit = new THREE.Vector3();
+
+  function setRay(cx, cy) {
+    const r = stage.getBoundingClientRect();
+    ndc.set((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+  }
+  // country under the pointer on the globe (analytic sphere hit, fast at any mesh resolution)
+  let hitUv = null;                    // where on the map the pointer is (u along longitude, v along latitude, 0..1)
+  function pick(cx, cy) {
+    setRay(cx, cy);
+    hitUv = null;
+    if (!ray.ray.intersectSphere(_sphere, _hit)) return -1;
+    _hit.applyQuaternion(_inv.copy(globe.quaternion).invert());
+    const lon = Math.atan2(-_hit.z, _hit.x) / D2R, lat = Math.asin(Math.max(-1, Math.min(1, _hit.y))) / D2R;
+    hitUv = [(lon + 180) / 360, (lat + 90) / 180];
+    return idAt(hitUv[0], hitUv[1]);
+  }
+  function overLifted(cx, cy) {
+    if (!lifted || lifted.t < 0.5) return false;
+    setRay(cx, cy);
+    const h = ray.intersectObject(lifted.t > 0.9 ? lifted.hit : lifted.cap, false)[0];   // flat once it is a 2D map
+    if (!h) return false;
+    hitUv = h.uv ? [h.uv.x, h.uv.y] : null;
+    return true;
+  }
+
+  // coordinates panel: the selected country (the parallels and meridians it lies between) and the point under
+  // the pointer
+  const pinRow = document.getElementById('pinRow'), pinHint = document.getElementById('pinHint');
+  const pinVal = document.getElementById('pinVal'), pinName = document.getElementById('pinName');
+  const ptrRow = document.getElementById('ptrRow'), ptrVal = document.getElementById('ptrVal');
+  const fmtLatLon = (lon, lat) => {
+    lon = ((lon + 540) % 360) - 180;
+    return Math.abs(lat).toFixed(2) + '° ' + (lat >= 0 ? 'N' : 'S') + '  ' + Math.abs(lon).toFixed(2) + '° ' + (lon >= 0 ? 'E' : 'W');
+  };
+  const uvLonLat = uv => [uv[0] * 360 - 180, uv[1] * 180 - 90];
+  function showPointer(uv) {
+    ptrRow.hidden = !uv;
+    if (uv) { const t = fmtLatLon(...uvLonLat(uv)); if (ptrVal.textContent !== t) ptrVal.textContent = t; }
+  }
+  // The parallels and meridians a country lies between, the way an atlas says it ("36°–42° N, 26°–45° E"):
+  // over the parts its 2D map shows (the main landmass and the islands near it, not far-off overseas lands),
+  // whole degrees, or tenths for a country less than 3 degrees across. Longitudes are unwrapped around its centre,
+  // so a country across the 180-degree meridian reads from its west end to its east end.
+  function extentText(c) {
+    let parts = c.frame;
+    if (!parts) {
+      let main = c.p[0];
+      for (const poly of c.p) if (ringArea(poly[0]) > ringArea(main[0])) main = poly;
+      parts = c.polar ? c.p : [main];
+    }
+    let lo0 = 999, lo1 = -999, la0 = 99, la1 = -99;
+    for (const poly of parts) for (const [lon, lat] of poly[0]) {
+      let x = lon;
+      while (x - c.center[0] > 180) x -= 360;
+      while (x - c.center[0] < -180) x += 360;
+      lo0 = Math.min(lo0, x); lo1 = Math.max(lo1, x); la0 = Math.min(la0, lat); la1 = Math.max(la1, lat);
+    }
+    const range = (a, b, pos, neg) => {
+      const d = b - a < 3 ? 1 : 0, f = x => Math.abs(x).toFixed(d) + '°';
+      if (f(a) === f(b) && (a >= 0) === (b >= 0)) return f(a) + ' ' + (a >= 0 ? pos : neg);
+      if (a >= 0) return f(a) + '–' + f(b) + ' ' + pos;              // all on one side
+      if (b <= 0) return f(b) + '–' + f(a) + ' ' + neg;
+      return f(a) + ' ' + neg + ' – ' + f(b) + ' ' + pos;              // across the equator / prime meridian
+    };
+    const wrap = x => ((x + 540) % 360) - 180;
+    const lons = c.polar || lo1 - lo0 >= 359 ? 'all longitudes'
+      : wrap(lo0) <= wrap(lo1) ? range(wrap(lo0), wrap(lo1), 'E', 'W')
+      : Math.abs(wrap(lo0)).toFixed(0) + '° E – ' + Math.abs(wrap(lo1)).toFixed(0) + '° W';   // across 180
+    return range(la0, la1, 'N', 'S') + ', ' + lons;
+  }
+  function showSelected(i) {
+    pinRow.hidden = i < 0; pinHint.hidden = i >= 0;
+    document.getElementById('tbot').hidden = i < 0;   // 2026-11-15: Expand button
+    if (i < 0) return;
+    pinVal.textContent = extentText(countries[i]);
+    pinName.textContent = countries[i].n;
+  }
+  showSelected(-1);
+
+  const tip = document.getElementById('tip'), tipName = document.getElementById('tipName'), tipVal = document.getElementById('tipVal');
+  let dragging = false, moved = 0, last = null;
+
+  stage.addEventListener('pointerdown', e => {
+    dragging = true; moved = 0; last = [e.clientX, e.clientY];
+    lastTouch = performance.now();
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', e => {
+    if (dragging) {
+      const dxp = e.clientX - last[0], dyp = e.clientY - last[1];
+      moved += Math.abs(dxp) + Math.abs(dyp);
+      if (moved > 4) {
+        target = null;
+        putBack(false);                      // moving the globe sends the country back (zoom stays)
+        stage.classList.add('drag'); tip.hidden = true; setHover(-1);
+        const k = 0.005 * (camDist - 1) / 2.4;
+        view.y += dxp * k; view.x = clampX(view.x + dyp * k);
+        vel = { x: dyp * k, y: dxp * k };
+      }
+      last = [e.clientX, e.clientY];
+      return;
+    }
+    const onPiece = overLifted(e.clientX, e.clientY);
+    const i = onPiece ? lifted.i : pick(e.clientX, e.clientY);
+    showPointer(hitUv);
+    if (i >= 0) lastTouch = performance.now();   // (2026-11-15: no longer stops the spin; kept as the time of the last touch)
+    setHover(i);
+    stage.classList.toggle('over', i >= 0 && !onPiece);
+    if (i >= 0) {
+      // the country, and with a trend on, the value right under the pointer
+      const x = tState.v && hitUv ? valueAtPoint(hitUv[0], hitUv[1]) : null;
+      let val = '';
+      if (x != null) {
+        const tm = trendMode(), unit = tm ? FT[tState.v].unit : shownUnit();   // 2026-11-15: forecast years point at the trend map
+        val = ((tState.show === 'change' || tm) && x > 0 ? '+' : '') + fmt(x, tm ? 2 : undefined) + (unit === '0–1' ? '' : ' ' + unit);
+      }
+      if (tipName.textContent !== countries[i].n) tipName.textContent = countries[i].n;
+      if (tipVal.textContent !== val) tipVal.textContent = val;
+      tip.style.left = e.clientX + 'px'; tip.style.top = e.clientY + 'px';
+      tip.hidden = false;
+    } else tip.hidden = true;
+  });
+  stage.addEventListener('pointerup', e => {
+    if (dragging && moved > 4 && focusMode) {
+      // focus mode: after turning the globe, focus on the country now in the middle
+      vel = { x: 0, y: 0 };
+      const r = stage.getBoundingClientRect();
+      const i = pick(r.left + r.width / 2, r.top + r.height / 2);
+      if (i >= 0) select(i);
+    } else if (dragging && moved <= 4 && overLifted(e.clientX, e.clientY)) {
+      // a click on the lifted 2D map keeps it as it is
+    } else if (dragging && moved <= 4) {
+      const i = pick(e.clientX, e.clientY);
+      if (i >= 0 && (i !== selected || !lifted)) select(i);
+      else if (i < 0 && !menuClosedByPress) select(-1);
+      vel = { x: 0, y: 0 };
+    }
+    dragging = false; stage.classList.remove('drag');
+  });
+  stage.addEventListener('pointercancel', () => { dragging = false; stage.classList.remove('drag'); });
+  stage.addEventListener('pointerleave', () => { if (!dragging) { setHover(-1); tip.hidden = true; showPointer(null); } });
+
+  stage.addEventListener('wheel', e => {
+    e.preventDefault();
+    spawn = null;                                        // 2026-11-15: the user took over during the spawn
+    lastTouch = performance.now();
+    targetZ = null;                          // the user took over the zoom
+    camDist = Math.max(1.25, Math.min(6, camDist * (1 + Math.sign(e.deltaY) * 0.08)));
+  }, { passive: false });
+
+  let lastFrame = performance.now();
+  const SPIN_SPEED = 2 * Math.PI / 45, SPIN_WAIT = 2500;   // radians a second; ms of calm before it turns again
+  let spin = 0, lastTouch = -SPIN_WAIT, spinAngle = 0;
+  // 2026-11-15: spawn after Simulate (index.html): starts when the first imagery is on the globe, or after 2.5 s at the latest
+  const SPAWN_MS = 2200;
+  let spawn = null, spawned = false;
+  function startSpawn() {
+    const html = document.documentElement;
+    if (spawned || !html.classList.contains('pre-spawn')) return;
+    spawned = true;
+    spawn = { t0: performance.now(), from: 9.5, to: camDist };
+    camDist = spawn.from; lastSig = []; wake();
+    html.classList.add('spawn-run');
+    setTimeout(() => html.classList.remove('pre-spawn'), 30);    // a timer, not an animation frame: hidden tabs pause animation frames
+    setTimeout(() => html.classList.remove('spawn-run'), 2600);
+  }
+  setTimeout(startSpawn, 2500);   // spinAngle: all idle turning so far (the lifted map cancels its share)
+  let spinOn = true;                                 // Configuration > Earth Spin
+  try { spinOn = localStorage.getItem('earthSpin') !== 'off'; } catch (e) {}
+  let localStep = () => {};                          // eases the lifted country's own colours in and out (section 11)
+  // what is on screen depends on these numbers; a frame is drawn only when one of them changed
+  let lastSig = [], wakeUntil = 0, lastDraw = 0;
+  const wake = () => { wakeUntil = performance.now() + 600; };
+  ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'click'].forEach(ev => window.addEventListener(ev, wake, { passive: true, capture: true }));
+  window.addEventListener('resize', wake);
+  function pushUniforms(sig, u) {
+    for (const k in u) {
+      const v = u[k].value;
+      if (typeof v === 'number') sig.push(v);
+      else if (v && v.isTexture) sig.push(v.id, v.version);
+    }
+  }
+  function screenSig() {
+    const sig = [view.x, view.y, camDist, camera.aspect, renderer.domElement.width, renderer.domElement.height];
+    pushUniforms(sig, uniforms);
+    for (const P of (lifted ? returning.concat([lifted]) : returning)) { sig.push(P.t); pushUniforms(sig, P.cap.material.uniforms); }
+    return sig;
+  }
+  function frame(now) {
+    now = now || performance.now();
+    const dt = Math.max(0, Math.min(0.05, (now - lastFrame) / 1000));   // never backwards
+    lastFrame = now;
+    // 2026-11-15: the Earth turns all the time, except while a clicked country is popped out (or Earth Spin is off in Configuration).
+    // A turn towards a country rides along with the spin; while the spin slows down, the lifted map cancels the last of it (animateLift).
+    const spinGoal = spinOn && !lifted ? 1 : 0;
+    spin += (spinGoal - spin) * (1 - Math.exp(-dt * (spinGoal ? 1.2 : 6)));
+    const dSpin = SPIN_SPEED * spin * dt;
+    spinAngle += dSpin;
+    if (target) target.y += dSpin;
+    if (target) {
+      const k = 1 - Math.exp(-dt * 8);
+      view.x += (target.x - view.x) * k;
+      view.y += (target.y - view.y) * k;
+      if (Math.abs(target.x - view.x) + Math.abs(target.y - view.y) < 1e-4) target = null;
+    } else if (!dragging) {
+      view.x = clampX(view.x + vel.x); view.y += vel.y;
+      vel.x *= 0.92; vel.y *= 0.92;
+    }
+    view.y += dSpin;                                     // west to east, about 45 seconds a turn
+    globe.rotation.x = view.x;
+    globe.rotation.y = view.y;
+    if (spawn) {                                          // 2026-11-15: spawn: fly in from afar while the Earth spins down to its usual pace
+      const p = Math.min(1, (now - spawn.t0) / SPAWN_MS), e = 1 - (1 - p) ** 3;
+      if (targetZ !== null || dragging) spawn = null;
+      else { camDist = spawn.from + (spawn.to - spawn.from) * e; view.y += dt * 2.8 * (1 - p) ** 2; if (p >= 1) spawn = null; }
+    }
+    animateLift(dt);
+    localStep(dt);
+    borderStyle();
+    const sig = screenSig();
+    let changed = sig.length !== lastSig.length;
+    for (let k = 0; !changed && k < sig.length; k++) if (sig[k] !== lastSig[k]) changed = true;
+    // also draw while the user is interacting, about 12 times a second for the twinkling stars (twice a second
+    // without it, as a safety net for late texture loads)
+    if (changed || now < wakeUntil || now - lastDraw > (sky.twinkles ? 83 : 500)) {
+      sky.update(now);
+      renderer.render(scene, camera);
+      lastSig = sig; lastDraw = now;
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+
+  // ---------- 10. configuration panel: world view + continents + every country ----------
+  // Earth Spin: the slow turn while nothing is happening, on or off (remembered on this browser)
+  // 2026-11-15: light / dark, switched by the logo (top right), remembered on this browser
+  const themeBtn = document.getElementById('themeBtn');
+  function applyTheme(t) {
+    const light = t === 'light';
+    if (light) document.documentElement.dataset.theme = 'light'; else delete document.documentElement.dataset.theme;
+    themeBtn.title = light ? 'Switch to dark mode' : 'Switch to light mode';
+    themeBtn.setAttribute('aria-label', 'EarthTREND. ' + themeBtn.title);
+    renderer.setClearColor(cssv('--space'));
+    lastSig = []; wake();                                  // draw the globe again on the new background
+    renderChart(); renderCropPanel(); renderLegend();
+    if (!botPop.hidden && selected >= 0) renderBot(selected);
+  }
+  let theme = 'dark'; try { theme = localStorage.getItem('theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  themeBtn.addEventListener('click', () => { theme = theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('theme', theme); } catch (e) {} applyTheme(theme); });
+  requestAnimationFrame(() => applyTheme(theme));
+  const spinBtn = document.getElementById('spinBtn');
+  spinBtn.setAttribute('aria-checked', String(spinOn));
+  spinBtn.addEventListener('click', () => {
+    spinOn = !spinOn;
+    spinBtn.setAttribute('aria-checked', String(spinOn));
+    try { localStorage.setItem('earthSpin', spinOn ? 'on' : 'off'); } catch (e) {}
+  });
+  const btn = document.getElementById('pickerBtn');
+  const panel = document.getElementById('panel');
+  const contsEl = document.getElementById('conts');
+  const listEl = document.getElementById('list');
+  const searchEl = document.getElementById('search');
+  const countEl = document.getElementById('count');
+
+  function dotColor(cont) {
+    const k = CONTINENTS[cont] || OTHER;
+    return `hsl(${k.h}, ${k.s}%, 50%)`;
+  }
+
+  function renderConts() {
+    contsEl.textContent = '';
+    [['All', null]].concat(Object.keys(CONTINENTS).map(k => [k, k])).forEach(([label, key]) => {
+      const b = document.createElement('button');
+      b.setAttribute('aria-pressed', String(key === continent));
+      if (key) { const d = document.createElement('span'); d.className = 'dot'; d.style.background = dotColor(key); b.appendChild(d); }
+      b.appendChild(document.createTextNode(label));
+      b.addEventListener('click', () => setContinent(key));
+      contsEl.appendChild(b);
+    });
+  }
+
+  function renderList() {
+    if (panel.hidden) return;                         // built when the panel opens
+    const q = searchEl.value.trim().toLowerCase();
+    listEl.textContent = '';
+    let n = 0;
+    countries.forEach((c, i) => {
+      if (continent && c.c !== continent) return;
+      if (q && !c.n.toLowerCase().includes(q)) return;
+      n++;
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      if (i === selected) b.setAttribute('aria-current', 'true');
+      const d = document.createElement('span'); d.className = 'dot'; d.style.background = dotColor(c.c);
+      b.append(d, document.createTextNode(c.n));
+      b.addEventListener('click', () => select(i));
+      b.addEventListener('mouseenter', () => setHover(i));
+      b.addEventListener('mouseleave', () => setHover(-1));
+      li.appendChild(b);
+      listEl.appendChild(li);
+    });
+    if (!n) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'No match'; listEl.appendChild(li); }
+    countEl.textContent = `${n} ${n === 1 ? 'country' : 'countries'}`;
+  }
+
+  function toggle(open) {
+    panel.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) { renderList(); searchEl.focus(); }
+  }
+  btn.addEventListener('click', e => { e.stopPropagation(); toggle(panel.hidden); });
+  let menuClosedByPress = false;                     // this press only closed the menu (section 9 reads it)
+  document.addEventListener('pointerdown', e => {
+    menuClosedByPress = !panel.hidden && !panel.contains(e.target) && !btn.contains(e.target);
+    if (menuClosedByPress) toggle(false);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!document.getElementById('botPop').hidden) document.getElementById('botPop').hidden = true;   // 2026-11-15
+    else if (!panel.hidden) toggle(false);
+    else if (focusMode) select(-1);
+  });
+  document.getElementById('exitFocus').addEventListener('click', () => select(-1));
+  searchEl.addEventListener('input', renderList);
+  document.getElementById('selClear').addEventListener('click', () => select(-1));
+
+  // ---------- 11. trends (NASA POWER, variables from the TVARS list below) over a year range ----------
+  const T = window.TRENDS || null;
+  const TVARS = {
+    T2M:               { label: 'Air temperature',           unit: '°C',        mode: 'diff', change: 3,    value: [-20, 30],  ramp: 'temp' },
+    T2M_MAX:           { label: 'Daily maximum temperature', unit: '°C',        mode: 'diff', change: 3,    value: [-15, 38],  ramp: 'temp' },
+    PRECTOTCORR:       { label: 'Precipitation',             unit: 'mm/yr',          mode: 'pct',  change: 30,   value: [0, 3000],  ramp: 'wet' },
+    GWETROOT:          { label: 'Root-zone soil wetness',    unit: '0–1',       mode: 'diff', change: 0.1,  value: [0, 1],     ramp: 'wet' },
+    ALLSKY_SFC_SW_DWN: { label: 'Surface sunlight',          unit: 'MJ/m²/day', mode: 'pct',  change: 8,    value: [8, 26],    ramp: 'sun' }
+  };
+  // colour ramps: [stop, [r,g,b]] ; "change" ramps run from -max to +max
+  const RAMPS = {
+    temp:  [[0, [49, 92, 168]], [0.5, [236, 236, 230]], [1, [196, 46, 43]]],
+    wet:   [[0, [150, 92, 38]], [0.5, [236, 236, 230]], [1, [33, 113, 181]]],
+    sun:   [[0, [70, 70, 120]], [0.5, [236, 236, 230]], [1, [230, 160, 30]]],
+    tempV: [[0, [40, 60, 150]], [0.35, [90, 170, 210]], [0.6, [240, 230, 150]], [0.8, [235, 140, 60]], [1, [170, 30, 40]]],
+    wetV:  [[0, [170, 110, 50]], [0.3, [225, 205, 140]], [0.6, [110, 180, 130]], [1, [30, 90, 170]]],
+    sunV:  [[0, [60, 60, 110]], [0.5, [200, 150, 90]], [1, [250, 220, 90]]]
+  };
+  function rampColor(stops, x) {
+    x = Math.max(0, Math.min(1, x));
+    let k = 0;
+    while (k < stops.length - 2 && x > stops[k + 1][0]) k++;
+    const [a, ca] = stops[k], [b, cb] = stops[k + 1];
+    const t = (x - a) / (b - a);
+    return ca.map((v, j) => Math.round(v + (cb[j] - v) * t));
+  }
+
+  const Y0 = T ? T.years[0] : 1981, Y1 = T ? T.years[1] : 2025;   // every series is indexed from Y0
+  // Air temperature has its own data (vendor/temp-5deg.js): observed 1990..2026 per 5-degree cell, then forecast
+  // years. Its range is also the one shown before a trend is chosen. The other trends keep Y0..Y1.
+  const T5 = window.TEMP5 || null;
+  // 2026-11-15: rain has the same kind of data (vendor/rain-5deg.js); RAW5[v] is the 5-degree file of trend v, if it has one
+  const RAIN5 = window.RAIN5 || null, RAW5 = { T2M: T5, PRECTOTCORR: RAIN5 };
+  const yrs = v => { const R = v ? RAW5[v] : T5; return R ? { min: R.years[0], obs: R.years[1], max: R.projected[1] } : { min: Y0, obs: Y1, max: Y1 }; };
+  const tState = { v: null, show: 'change', from: yrs(null).min, to: yrs(null).obs, year: yrs(null).obs, playing: false };
+  const yObs = () => yrs(tState.v).obs;                // last observed year of the chosen trend
+  // what to say next to a year that is not a plain observed one
+  const yearTag = y => (y > yObs() ? ' forecast'
+    : RAW5[tState.v] && RAW5[tState.v].partial[y] ? ' (' + RAW5[tState.v].partial[y] + ' months observed)' : '');
+
+  const yFrom = document.getElementById('yFrom'), yTo = document.getElementById('yTo');
+  const tYear = document.getElementById('tYear'), tYearOut = document.getElementById('tYearOut');
+  const playBtn = document.getElementById('play'), playIcon = document.getElementById('playIcon');
+  // the year selects offer the years of the chosen trend; a range that began / ended on the first / last
+  // observed year goes on doing so
+  let yNow = null;
+  function syncYears() {
+    const r = yrs(tState.v);
+    if (yNow && r.min === yNow.min && r.obs === yNow.obs && r.max === yNow.max) return;
+    for (const sel of [yFrom, yTo]) {
+      sel.textContent = '';
+      for (let y = r.min; y <= r.obs; y++) sel.add(new Option(y, y));
+      if (r.max > r.obs) {
+        const grp = document.createElement('optgroup');
+        grp.label = 'Forecast';
+        for (let y = r.obs + 1; y <= r.max; y++) grp.appendChild(new Option(y, y));
+        sel.appendChild(grp);
+      }
+    }
+    if (yNow && tState.from === yNow.min) tState.from = r.min;
+    if (yNow && tState.to === yNow.obs) tState.to = r.obs;
+    tState.from = Math.max(r.min, Math.min(r.max, tState.from));
+    tState.to = Math.max(r.min, Math.min(r.max, tState.to));
+    if (tState.from > tState.to) tState.from = r.min;
+    tState.year = Math.max(tState.from, Math.min(tState.to, tState.year));
+    yFrom.value = tState.from; yTo.value = tState.to;
+    yNow = r;
+  }
+  syncYears();
+
+  // value of a country's series at a (possibly fractional) year
+  function seriesOf(i) {
+    const c = countries[i];
+    return T && tState.v && T.data[c.d] ? T.data[c.d][tState.v] : null;
+  }
+  // 2026-11-15 (memory): a series is a plain array (null = no value) or a Float32Array (NaN = no value)
+  const has = x => x != null && x === x;
+  function valueAt(series, year) {
+    const a = Math.floor(year), b = Math.min(Y0 + series.length - 1, a + 1), t = year - a;
+    const va = series[a - Y0], vb = series[b - Y0];
+    if (!has(va)) return has(vb) ? vb : null;
+    if (!has(vb) || t === 0) return va;
+    return va + (vb - va) * t;
+  }
+  // baseline for "Change": mean of the first (up to) 5 years of the range
+  function baseline(series) {
+    const xs = [];
+    for (let y = tState.from; y <= Math.min(tState.to, tState.from + 4); y++) if (has(series[y - Y0])) xs.push(series[y - Y0]);
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+  }
+  function shown(series, year) {
+    const v = valueAt(series, year);
+    if (v == null) return null;
+    if (tState.show === 'value') return v;
+    const b = baseline(series);
+    if (b == null) return null;
+    return TVARS[tState.v].mode === 'pct' ? (b === 0 ? null : (v - b) / Math.abs(b) * 100) : v - b;
+  }
+  // colour table over the legend range (256 steps), and that range
+  function legendLut() {
+    const info = TVARS[tState.v];
+    if (trendMode()) { const R = FT[tState.v].range, lut = new Uint8Array(256 * 3); for (let i = 0; i < 256; i++) lut.set(ftColor(-R + 2 * R * i / 255), i * 3); return { lut, lo: -R, hi: R }; }   // 2026-11-15
+    const [lo, hi] = tState.show === 'value' ? info.value : [-info.change, info.change];
+    const lut = new Uint8Array(256 * 3);
+    for (let i = 0; i < 256; i++) lut.set(colorFor(lo + (hi - lo) * i / 255), i * 3);
+    return { lut, lo, hi };
+  }
+  function colorFor(x) {
+    const info = TVARS[tState.v];
+    if (tState.show === 'value') {
+      const [lo, hi] = info.value;
+      return rampColor(RAMPS[info.ramp + 'V'], (x - lo) / (hi - lo));
+    }
+    return rampColor(RAMPS[info.ramp], 0.5 + x / (2 * info.change));
+  }
+
+  // ---- continuous field, the EarthTrend way: every land pixel is an inverse-distance blend of the 4 nearest
+  // NASA POWER cells (2.5 degrees apart), so values change smoothly inside a country and across borders ----
+  const TL = window.TRENDS_LAND || null;
+  if (TL) for (const v in TL.data) {                        // stored as integers; turn back into values
+    if (T5 && RAW5[v]) continue;                             // 2026-11-15: replaced below by the 5-degree cells
+    const k = TL.scale[v];
+    TL.data[v] = TL.data[v].map(a => Float32Array.from(a, x => (x == null ? NaN : x / k)));   // 2026-11-15 (memory): 4 bytes a value, not ~20
+  }
+  // ---- air temperature per 5-degree cell (vendor/temp-5deg.js): observed years, then the forecast ones ----
+  // t5.vals[cell * NA + (year - t5.a)], cell = row * 72 + col from 90S / 180W. The land points of the smooth field
+  // take their cell's series, a country the mean of the cells its land points lie in.
+  const build5 = R => {                                  // 2026-11-15: the same unpacking for every 5-degree file (was temperature only)
+    const [a, b] = R.years, q = R.projected[1], NO = b - a + 1, NA = q - a + 1, k = R.scale;
+    const vals = new Float32Array(2592 * NA), lo = new Float32Array(2592 * NA).fill(NaN), hi = new Float32Array(2592 * NA).fill(NaN);
+    const r0 = R.range[0] - a, NR = NA - r0;             // the forecast's 80% range starts in year a + r0
+    const num = x => (x == null ? NaN : x / k);
+    for (let ci = 0; ci < 2592; ci++) {
+      for (let y = 0; y < NO; y++) vals[ci * NA + y] = num(R.obs[ci * NO + y]);
+      for (let y = NO; y < NA; y++) vals[ci * NA + y] = num(R.proj[ci * (NA - NO) + y - NO]);
+      for (let y = 0; y < NR; y++) { lo[ci * NA + r0 + y] = num(R.lo[ci * NR + y]); hi[ci * NA + r0 + y] = num(R.hi[ci * NR + y]); }
+    }
+    delete R.obs; delete R.proj; delete R.lo; delete R.hi;   // 2026-11-15 (memory): the integers are not needed once unpacked
+    return { a, NA, vals, lo, hi, cellsOf: [], bands: {} };
+  };
+  const f5 = {}; for (const v in RAW5) if (RAW5[v]) f5[v] = build5(RAW5[v]);
+  const t5 = f5.T2M || null;
+  // 2026-11-15: the second temperature forecast (Upcoming Years Temp), yearly means per cell, drawn next to the first in the chart
+  const TU = window.TEMPUP || null;
+  // 2026-11-15: in forecast years the globe shows each cell's forecast TREND per decade (the rate the forecast uses every year), not the
+  // year's value: a straight-line forecast moves about 0.02 C a year, too little to see on the value scale, so the map looked frozen
+  const FT = window.FTREND || null;
+  const trendMode = () => !!(FT && tState.v && FT[tState.v] && f5[tState.v] && Math.floor(tState.year) > yObs());
+  const ftColor = x => rampColor(RAMPS[TVARS[tState.v].ramp], 0.5 + x / (2 * FT[tState.v].range));
+  const ftCountry = i => { const c = t5 && t5.cellsOf[i], V = FT[tState.v].vals; if (!c || !c.length) return null; let s = 0, m = 0; for (const ci of c) if (V[ci] != null) { s += V[ci]; m++; } return m ? s / m : null; };
+  // the 80% range of a country's forecast years, indexed from Y0 like its series (null where there is none)
+  function t5Band(i, F = t5) {
+    if (F.bands[i]) return F.bands[i];
+    const cells = t5.cellsOf[i] || [], mk = arr => {      // a country's cells are the same for every variable
+      const out = new Array(F.a - Y0).fill(null);
+      for (let y = 0; y < F.NA; y++) { let x = 0; for (const ci of cells) x += arr[ci * F.NA + y]; out.push(cells.length && x === x ? x / cells.length : null); }
+      return out;
+    };
+    return F.bands[i] = { lo: mk(F.lo), hi: mk(F.hi) };
+  }
+  // 2026-11-15: a country's Upcoming Years forecast (mean of its cells), indexed from Y0
+  function upcomingOf(i) {
+    if (!TU || !t5) return null;
+    const cells = t5.cellsOf[i] || [], n = TU.years[1] - TU.years[0] + 1, out = new Array(TU.years[0] - Y0).fill(null);
+    for (let y = 0; y < n; y++) { let x = 0, m = 0; for (const ci of cells) { const v = TU.vals[ci * n + y]; if (v != null) { x += v / TU.scale; m++; } } out.push(m ? x / m : null); }
+    return out;
+  }
+  if (t5) {
+    const cellOf = (lon, lat) => Math.min(35, Math.max(0, Math.floor((lat + 90) / 5))) * 72 + ((Math.floor((lon + 180) / 5) % 72) + 72) % 72;
+    const seriesFor = (cells, F = t5) => {
+      const out = new Array(F.a - Y0).fill(null);          // indexed from Y0 like every other series
+      for (let y = 0; y < F.NA; y++) { let x = 0; for (const ci of cells) x += F.vals[ci * F.NA + y]; out.push(x === x ? x / cells.length : null); }
+      return out;
+    };
+    const byCountry = {};
+    // 2026-11-15 (memory): a land point takes its 5-degree cell's series; points in the same cell share one Float32Array
+    const cellSeries = (ci, F) => {
+      const memo = F.pts || (F.pts = new Map());
+      let out = memo.get(ci);
+      if (!out) { out = new Float32Array(F.a - Y0 + F.NA).fill(NaN); out.set(F.vals.subarray(ci * F.NA, (ci + 1) * F.NA), F.a - Y0); memo.set(ci, out); }
+      return out;
+    };
+    if (TL) {
+      TL.data.T2M = TL.points.map(([lon, lat]) => {
+        const ci = cellOf(lon, lat), i = idAt((lon + 180) / 360, (lat + 90) / 180);
+        if (i >= 0) (byCountry[i] || (byCountry[i] = [])).push(ci);
+        return cellSeries(ci, t5);
+      });
+      for (const v in f5) if (v !== 'T2M') TL.data[v] = TL.points.map(([lon, lat]) => cellSeries(cellOf(lon, lat), f5[v]));
+      for (const v in f5) f5[v].pts = null;
+    }
+    if (T) countries.forEach((c, i) => {
+      t5.cellsOf[i] = byCountry[i] || [cellOf(c.center[0], c.center[1])];
+      for (const v in f5) (T.data[c.d] || (T.data[c.d] = {}))[v] = seriesFor(t5.cellsOf[i], f5[v]);   // 2026-11-15: every 5-degree variable
+    });
+  }
+
+  let fieldMap = null;
+  function buildFieldMap() {
+    const pts = TL.points, STEP = 2.5, NI = 144, NJ = 72, W = FIELD_W, H = FIELD_H;
+    const at = new Int32Array(NI * NJ).fill(-1);            // lattice cell -> point index
+    const plon = new Float32Array(pts.length), plat = new Float32Array(pts.length);
+    pts.forEach(([lon, lat], k) => { plon[k] = lon; plat[k] = lat; at[Math.floor((lat + 90) / STEP) * NI + Math.floor((lon + 180) / STEP)] = k; });
+    // land mask at field resolution, grown by one pixel so the coast never shows a gap
+    const land = new Uint8Array(W * H), near = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) land[y * W + x] = idAt((x + 0.5) / W, 1 - (y + 0.5) / H) >= 0 ? 1 : 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const p = y * W + x;
+      near[p] = land[p] || land[y * W + (x + 1) % W] || land[y * W + (x + W - 1) % W] || (y > 0 && land[p - W]) || (y < H - 1 && land[p + W]);
+    }
+    let count = 0;
+    for (let p = 0; p < W * H; p++) count += near[p];
+    const pix = new Int32Array(count), nb = new Int32Array(count * 4), wt = new Float32Array(count * 4);
+    const bd = new Float64Array(4), bk = new Int32Array(4);
+    let n = 0;
+    for (let y = 0; y < H; y++) {
+      const lat = 90 - (y + 0.5) * 180 / H, cosL = Math.max(0.05, Math.cos(lat * D2R)), cos2 = cosL * cosL;
+      const j0 = Math.floor((lat + 90) / STEP);
+      for (let x = 0; x < W; x++) {
+        if (!near[y * W + x]) continue;
+        const lon = -180 + (x + 0.5) * 360 / W, i0 = Math.floor((lon + 180) / STEP);
+        bd.fill(1e9); bk.fill(-1);
+        // look 2 cells around; where points are sparse (6-degree EarthTrend points), look further
+        for (let r = 2; r <= 4 && bk[3] < 0; r++) {
+        bd.fill(1e9); bk.fill(-1);
+        const di = Math.min(72, Math.ceil(r / cosL)), ja = Math.max(0, j0 - r), jb = Math.min(NJ - 1, j0 + r);
+        for (let j = ja; j <= jb; j++) for (let i = i0 - di; i <= i0 + di; i++) {
+          const k = at[j * NI + ((i % NI) + NI) % NI];
+          if (k < 0) continue;
+          let dl = plon[k] - lon; if (dl < 0) dl = -dl; if (dl > 180) dl = 360 - dl;
+          const dy = plat[k] - lat, d = dl * dl * cos2 + dy * dy;
+          if (d >= bd[3]) continue;
+          let q = 3;
+          while (q > 0 && bd[q - 1] > d) { bd[q] = bd[q - 1]; bk[q] = bk[q - 1]; q--; }
+          bd[q] = d; bk[q] = k;
+        }
+        }
+        let sw = 0;
+        for (let q = 0; q < 4; q++) { const w = bk[q] < 0 ? 0 : 1 / (bd[q] + 0.7); wt[n * 4 + q] = w; sw += w; nb[n * 4 + q] = Math.max(0, bk[q]); }
+        if (sw > 0) for (let q = 0; q < 4; q++) wt[n * 4 + q] /= sw;
+        pix[n++] = y * W + x;                                // no cell nearby: weights 0, painted as hatching
+      }
+    }
+    fieldMap = { pix, nb, wt };
+  }
+  // build the pixel -> cell table while the page is idle, so the first trend click is instant
+  if (TL) (window.requestIdleCallback || setTimeout)(() => { if (!fieldMap) buildFieldMap(); });
+
+  const fctx = fieldCv.getContext('2d');
+  let fieldImg = null;
+  function paintField() {
+    if (!fieldMap) buildFieldMap();
+    const all = TL.data[tState.v];
+    // each cell's value once per paint, not once per pixel
+    const cv = new Float32Array(all.length);
+    for (let k = 0; k < all.length; k++) { const x = shown(all[k], tState.year); cv[k] = x == null ? NaN : x; }
+    const { lut, lo, hi } = legendLut();
+    if (!fieldImg) fieldImg = fctx.createImageData(FIELD_W, FIELD_H);
+    const d = fieldImg.data;
+    d.fill(0);
+    const { pix, nb, wt } = fieldMap;
+    for (let q = 0; q < pix.length; q++) {
+      let s = 0, ws = 0;
+      for (let k = 0; k < 4; k++) {
+        const v = cv[nb[q * 4 + k]];
+        if (v === v) { const w = wt[q * 4 + k]; s += v * w; ws += w; }
+      }
+      const p = pix[q], o = p * 4;
+      if (ws < 0.5) {                                        // not enough data around: grey hatching
+        const x = p % FIELD_W, y = (p / FIELD_W) | 0;
+        d[o] = 120; d[o + 1] = 128; d[o + 2] = 138; d[o + 3] = (x + y) % 8 < 3 ? 150 : 60;
+        continue;
+      }
+      const c = Math.max(0, Math.min(255, Math.round((s / ws - lo) / (hi - lo) * 255))) * 3;
+      d[o] = lut[c]; d[o + 1] = lut[c + 1]; d[o + 2] = lut[c + 2]; d[o + 3] = 255;
+    }
+    fctx.putImageData(fieldImg, 0, 0);
+    fieldTex.needsUpdate = true;
+  }
+
+  // ---- NASA POWER on its native grid (vendor/power-hr): 0.5 x 0.625 degree cells, loaded per variable ----
+  const GRID = 5;                                    // degrees: size of the trend map's grid cells
+  const HR = { grid: null, vals: {}, state: {}, img: null, tex: null, base: null, bkey: '' };
+  function hrInit() {
+    const g = window.POWER_HR.grid, m = atob(g.mask), cells = [];
+    for (let k = 0; k < m.length; k++) if (m.charCodeAt(k)) cells.push(k);
+    g.cells = Int32Array.from(cells);
+    HR.grid = g;
+    // 5-degree cells (72 x 36, from -180 / -90): which one each native cell falls in, and its area weight;
+    // only cells whose centre is on land count, so coastal cells are not pulled towards the sea
+    HR.cIdx = new Int16Array(cells.length).fill(-1);
+    HR.cW = new Float32Array(cells.length);
+    cells.forEach((k, n) => {
+      const j = Math.floor(k / g.ni), i = k % g.ni, lat = g.lat0 + g.dlat * j, lon = g.lon0 + g.dlon * i;
+      const px = Math.min(ID_W - 1, Math.floor((lon + 180) / 360 * ID_W)), py = Math.min(ID_H - 1, Math.floor((90 - lat) / 180 * ID_H));
+      if (landData[py * ID_W + px] < 128) return;
+      HR.cIdx[n] = Math.min(35, Math.floor((lat + 90) / GRID)) * 72 + Math.floor((lon + 180) / GRID) % 72;
+      HR.cW[n] = Math.cos(lat * D2R);
+    });
+    HR.cVal = new Float32Array(72 * 36);
+    HR.img = new Uint8Array(72 * 36 * 4);
+    HR.tex = new THREE.DataTexture(HR.img, 72, 36, THREE.RGBAFormat);
+    HR.tex.magFilter = HR.tex.minFilter = THREE.LinearFilter;    // blended in the shader (smooth cubic)
+    HR.tex.wrapS = THREE.RepeatWrapping;
+    HR.tex.generateMipmaps = false;
+    uniforms.hrTex.value = HR.tex;
+  }
+  // 2026-11-15 (memory): a grid file is read as text and its base64 taken out, so the 10 MB text is freed once decoded (a script
+  // tag's text stays in the browser's script cache). Opened straight from disk, where fetch is not allowed, it loads as a script.
+  function loadGrid(v) {
+    const url = 'vendor/power-hr/' + v + '.js';
+    return fetch(url).then(r => { if (!r.ok) throw new Error(url); return r.text(); })
+      .then(t => { const a = t.indexOf('="') + 2, b = t.lastIndexOf('"'); if (a < 2 || b <= a) throw new Error(url); (window.POWER_HR = window.POWER_HR || {})[v] = t.slice(a, b); })
+      .catch(() => loadScript(url));
+  }
+  let hrGridLoad = null;
+  const hrPromise = {};
+  function hrLoad(v) {
+    if (hrPromise[v]) return hrPromise[v];
+    HR.state[v] = 'loading';
+    if (!hrGridLoad) hrGridLoad = loadScript('vendor/power-hr/mask.js').then(hrInit);
+    return hrPromise[v] = hrGridLoad
+      .then(() => (f5[v] ? null : loadGrid(v)))
+      .then(() => new Promise(done => {
+        if (f5[v]) {                                      // its 5-degree cells are already here
+          HR.state[v] = 'ready';
+          if (tState.v === v) refreshTrends(true);
+          done();
+          return;
+        }
+        const bin = atob(window.POWER_HR[v]), bytes = new Uint8Array(bin.length);
+        delete window.POWER_HR[v];
+        let k = 0;
+        const step = () => {                              // in slices, so the page never stalls; the chosen trend in one go
+          for (const end = tState.v === v ? bin.length : Math.min(bin.length, k + 1500000); k < end; k++) bytes[k] = bin.charCodeAt(k);
+          if (k < bin.length) { idle(step); return; }
+          HR.vals[v] = new Int16Array(bytes.buffer);
+          HR.state[v] = 'ready';
+          if (tState.v === v) refreshTrends(true);
+          done();
+        };
+        step();
+      }))
+      .catch(() => { HR.state[v] = 'missing'; });        // no file for this variable: the 2.5-degree field stays
+  }
+  // Load every variable's native grid in the background right after the page opens, one at a time and only
+  // when the browser is idle, so the sharp map is already there when a trend is picked.
+  // Pointing at a trend in the list loads that one first.
+  const idle = cb => (window.requestIdleCallback ? requestIdleCallback(cb, { timeout: 1500 }) : setTimeout(cb, 200));
+  function hrPreload(list) {
+    const v = list.find(x => !hrPromise[x]);
+    if (!v) return;
+    idle(() => hrLoad(v).then(() => hrPreload(list)));
+  }
+  // 2026-11-15: no blanket preload any more. On a public site every visitor would download 30 MB of grids on arrival; now a grid
+  // loads when its trend is pointed at or chosen (hrLoad), and the 5-degree trends need none.
+  // air temperature: the map's 5-degree cells are the data's own cells
+  function paintT5() {
+    const { a, NA, vals } = f5[tState.v], d = HR.img, cv = HR.cVal, change = tState.show !== 'value', pct = TVARS[tState.v].mode === 'pct';
+    const { lut, lo, hi } = legendLut();
+    if (trendMode()) {                                   // 2026-11-15: forecast years -> each cell's forecast trend per decade
+      const V = FT[tState.v].vals;
+      for (let ci = 0; ci < 2592; ci++) {
+        const x = V[ci] == null ? NaN : V[ci], o = ci * 4; cv[ci] = x;
+        if (x !== x) { d[o + 3] = 0; continue; }
+        const q = Math.max(0, Math.min(255, Math.round((x - lo) / (hi - lo) * 255))) * 3;
+        d[o] = lut[q]; d[o + 1] = lut[q + 1]; d[o + 2] = lut[q + 2]; d[o + 3] = 255;
+      }
+      HR.cShown = cv; HR.tex.needsUpdate = true; return;
+    }
+    const yr = Math.max(a, Math.min(a + NA - 1, tState.year)), ia = Math.floor(yr) - a, t = yr - Math.floor(yr), ib = Math.min(NA - 1, ia + 1);
+    const b0 = tState.from - a, b1 = Math.min(tState.to, tState.from + 4) - a;   // "Change" baseline years
+    for (let ci = 0; ci < 2592; ci++) {
+      let x = vals[ci * NA + ia];
+      if (t) x += (vals[ci * NA + ib] - x) * t;
+      if (change) { let sum = 0; for (let y = b0; y <= b1; y++) sum += vals[ci * NA + y]; const b = sum / (b1 - b0 + 1); x = pct ? (b ? (x - b) / Math.abs(b) * 100 : 0) : x - b; }   // 2026-11-15: % change for rain
+      cv[ci] = x;
+      const q = Math.max(0, Math.min(255, Math.round((x - lo) / (hi - lo) * 255))) * 3, o = ci * 4;
+      d[o] = lut[q]; d[o + 1] = lut[q + 1]; d[o + 2] = lut[q + 2]; d[o + 3] = 255;
+    }
+    HR.cShown = cv;
+    HR.tex.needsUpdate = true;
+  }
+  function paintHR() {
+    if (f5[tState.v]) { paintT5(); return; }
+    const g = HR.grid, v = tState.v, vals = HR.vals[v], cells = g.cells, NY = Y1 - Y0 + 1, k = g.scale[v];
+    const info = TVARS[v], MISS = -32768, n = cells.length;
+    // "Change" baseline per cell: mean of the first (up to) 5 years of the range, kept until the range changes
+    const bkey = v + '|' + tState.from + '|' + tState.to;
+    if (HR.bkey !== bkey) {
+      HR.base = new Float32Array(n);
+      for (let c = 0; c < n; c++) {
+        let s = 0, m = 0;
+        for (let y = tState.from; y <= Math.min(tState.to, tState.from + 4); y++) { const x = vals[c * NY + y - Y0]; if (x !== MISS) { s += x; m++; } }
+        HR.base[c] = m ? s / m / k : NaN;
+      }
+      HR.bkey = bkey;
+    }
+    const { lut, lo, hi } = legendLut();
+    const yr = tState.year, a = Math.floor(yr), t = yr - a, ia = a - Y0, ib = Math.min(Y1, a + 1) - Y0;
+    const pct = info.mode === 'pct', change = tState.show !== 'value', d = HR.img;
+    const sum = new Float64Array(72 * 36), wsum = new Float64Array(72 * 36);
+    d.fill(0);
+    // while a country is lifted: every native cell's shown value too, for its own map (section 11, local)
+    const nat = lifted ? (HR.nat || (HR.nat = new Float32Array(g.ni * g.nj))) : null;
+    if (nat) nat.fill(NaN);
+    for (let c = 0; c < n; c++) {
+      const ci = HR.cIdx[c];
+      if (ci < 0 && !nat) continue;
+      const xa = vals[c * NY + ia], xb = vals[c * NY + ib];
+      let x;
+      if (xa === MISS) { if (xb === MISS) continue; x = xb / k; }
+      else x = (xb === MISS || t === 0 ? xa : xa + (xb - xa) * t) / k;
+      if (change) {
+        const b = HR.base[c];
+        if (b !== b) continue;
+        x = pct ? (b === 0 ? NaN : (x - b) / Math.abs(b) * 100) : x - b;
+        if (x !== x) continue;
+      }
+      if (nat) nat[cells[c]] = x;
+      if (ci < 0) continue;
+      sum[ci] += x * HR.cW[c]; wsum[ci] += HR.cW[c];
+    }
+    // cell means; empty cells on a coast take the mean of their filled neighbours so the land edge is covered
+    const cv = HR.cVal;
+    for (let ci = 0; ci < cv.length; ci++) cv[ci] = wsum[ci] > 0 ? sum[ci] / wsum[ci] : NaN;
+    let filled = Float32Array.from(cv);
+    for (let pass = 0; pass < 3; pass++) {
+      const src = filled;
+      filled = Float32Array.from(src);
+      for (let ci = 0; ci < cv.length; ci++) {
+        if (src[ci] === src[ci]) continue;
+        const j = Math.floor(ci / 72), i = ci % 72;
+        let s2 = 0, m = 0;
+        for (const [dj, di] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+          const jj = j + dj; if (jj < 0 || jj > 35) continue;
+          const x = src[jj * 72 + (i + di + 72) % 72];
+          if (x === x) { s2 += x; m++; }
+        }
+        if (m) filled[ci] = s2 / m;
+      }
+    }
+    for (let ci = 0; ci < cv.length; ci++) {
+      const x = filled[ci];
+      if (x !== x) continue;
+      const q = Math.max(0, Math.min(255, Math.round((x - lo) / (hi - lo) * 255))) * 3, o = ci * 4;
+      d[o] = lut[q]; d[o + 1] = lut[q + 1]; d[o + 2] = lut[q + 2]; d[o + 3] = 255;
+    }
+    HR.cShown = filled;
+    HR.tex.needsUpdate = true;
+  }
+  const hrReady = () => tState.v && HR.state[tState.v] === 'ready';
+
+  // ---- lifted country: its own map, in steps over its own range ----
+  // On the globe the trend map is blended very smoothly, which reads well from afar but leaves a country's
+  // regions looking alike. The lifted country instead shows the data's own cells (air temperature: 5-degree cells;
+  // the other trends: the native 0.5 x 0.625-degree grid), joined smoothly, coloured in about 6-10 steps that
+  // span only the values inside it. The legend gets a second bar for these steps.
+  const LOC = { on: false, ease: 0, ci: -1, pts: null, tex: {}, lut: new Uint8Array(16 * 4), lutTex: null, bands: null, legendKey: '' };
+  LOC.lutTex = new THREE.DataTexture(LOC.lut, 16, 1, THREE.RGBAFormat);
+  LOC.lutTex.magFilter = LOC.lutTex.minFilter = THREE.NearestFilter;
+  LOC.lutTex.generateMipmaps = false;
+  uniforms.locLut.value = LOC.lutTex;
+  // the grid the lifted country is drawn from, with every value it needs (cells near a coast filled from
+  // their neighbours, so the curve has values on both sides of the shore)
+  function localGrid(P) {
+    if (f5[tState.v]) return !hrReady() || !HR.cShown ? null : { raw: HR.cShown, ni: 72, nj: 36, lon0: -177.5, lat0: -87.5, dlon: 5, dlat: 5 };
+    const g = HR.grid;
+    if (!g || !HR.nat || !hrReady()) return null;
+    const G = { raw: Float32Array.from(HR.nat), ni: g.ni, nj: g.nj, lon0: g.lon0, lat0: g.lat0, dlon: g.dlon, dlat: g.dlat };
+    const [w0, s0, e0, n0] = P.box, M = 4;
+    const ia = Math.floor((w0 - G.lon0) / G.dlon) - M, ib = Math.ceil((e0 - G.lon0) / G.dlon) + M;
+    const ja = Math.max(0, Math.floor((s0 - G.lat0) / G.dlat) - M), jb = Math.min(G.nj - 1, Math.ceil((n0 - G.lat0) / G.dlat) + M);
+    for (let pass = 0; pass < M; pass++) {
+      const src = Float32Array.from(G.raw);
+      for (let j = ja; j <= jb; j++) for (let i0 = ia; i0 <= ib; i0++) {
+        const i = ((i0 % G.ni) + G.ni) % G.ni, k = j * G.ni + i;
+        if (src[k] === src[k]) continue;
+        let sm = 0, m = 0;
+        for (const [dj, di] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+          const jj = j + dj; if (jj < 0 || jj >= G.nj) continue;
+          const x = src[jj * G.ni + (i + di + G.ni) % G.ni];
+          if (x === x) { sm += x; m++; }
+        }
+        if (m) G.raw[k] = sm / m;
+      }
+    }
+    return G;
+  }
+  const crW = t => { const t2 = t * t, t3 = t2 * t; return [-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1, -1.5 * t3 + 2 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2]; };
+  function localAt(G, lon, lat) {                     // the same curve as the shader, on the raw values
+    const px = (lon - G.lon0) / G.dlon, py = (lat - G.lat0) / G.dlat, i0 = Math.floor(px), j0 = Math.floor(py);
+    const wx = crW(px - i0), wy = crW(py - j0);
+    let sum = 0;
+    for (let y = 0; y < 4; y++) {
+      const jj = Math.max(0, Math.min(G.nj - 1, j0 + y - 1));
+      for (let x = 0; x < 4; x++) sum += wx[x] * wy[y] * G.raw[jj * G.ni + (((i0 + x - 1) % G.ni) + G.ni) % G.ni];
+    }
+    return sum;
+  }
+  // points inside the lifted country (about 80 x 80 over its box), where its range is measured
+  function localPoints(P) {
+    const [w0, s0, e0, n0] = P.box, st = Math.max(0.05, Math.max(e0 - w0, n0 - s0) / 80), pts = [];
+    for (let lat = s0 + st / 2; lat < n0; lat += st) for (let lon = w0 + st / 2; lon < e0; lon += st) {
+      const L = lon > 180 ? lon - 360 : lon;
+      if (idAt((L + 180) / 360, (lat + 90) / 180) === P.i) pts.push(L, lat);
+    }
+    return pts;
+  }
+  // colour of a value inside the country's range: the trend's own ramp, stretched over that range.
+  // "Change": a range all above zero uses the warm / wet / bright half only (light = less, dark = more),
+  // all below zero the other half, and one across zero the whole ramp around zero.
+  function localColor(x, lo, hi) {
+    const info = TVARS[tState.v];
+    if (tState.show === 'value') return rampColor(RAMPS[info.ramp + 'V'], (x - lo) / (hi - lo));
+    const r = RAMPS[info.ramp];
+    if (lo >= 0) return rampColor(r, 0.6 + 0.4 * (x - lo) / (hi - lo));
+    if (hi <= 0) return rampColor(r, 0.4 * (x - lo) / (hi - lo));
+    const m = Math.max(-lo, hi);
+    return rampColor(r, 0.5 + 0.5 * x / m);
+  }
+  function paintLocal() {
+    const P = lifted, G = P && tState.v ? localGrid(P) : null;
+    LOC.on = false;
+    if (G) {
+      if (LOC.ci !== P.i || !LOC.pts) { LOC.ci = P.i; LOC.pts = localPoints(P); }
+      // its range: 2nd to 98th percentile of the values inside it, so one odd cell does not flatten the rest
+      // (values beyond fall in the end steps)
+      const xs = [];
+      for (let k = 0; k < LOC.pts.length; k += 2) { const x = localAt(G, LOC.pts[k], LOC.pts[k + 1]); if (x === x) xs.push(x); }
+      xs.sort((a, b) => a - b);
+      let lo = xs[Math.floor((xs.length - 1) * 0.02)], hi = xs[Math.ceil((xs.length - 1) * 0.98)];
+      if (xs.length) {
+        // steps at round values; a country with almost no spread is not blown up into noise
+        const info = TVARS[tState.v];
+        const minSpan = tState.show === 'value' ? (info.value[1] - info.value[0]) * 0.01 : info.mode === 'pct' ? 1 : info.change * 0.05;
+        if (hi - lo < minSpan) { const c = (lo + hi) / 2; lo = c - minSpan / 2; hi = c + minSpan / 2; }
+        let n = 7, step, loB, hiB, NB;
+        do {
+          step = niceTicks(lo, hi, n).step;
+          loB = Math.floor(lo / step + 1e-9) * step; hiB = Math.ceil(hi / step - 1e-9) * step;
+          NB = Math.max(1, Math.round((hiB - loB) / step));
+          n--;
+        } while (NB > 12 && n > 1);
+        if (hiB <= loB) hiB = loB + step;
+        const colors = [];
+        for (let b = 0; b < NB; b++) { const c = localColor(loB + (b + 0.5) * step, loB, hiB); colors.push(c); LOC.lut.set([c[0], c[1], c[2], 255], b * 4); }
+        LOC.lutTex.needsUpdate = true;
+        // the values, 0..1 over the steps, 16 bits in red and green
+        const key = G.ni + 'x' + G.nj;
+        let T = LOC.tex[key];
+        if (!T) {
+          T = LOC.tex[key] = new THREE.DataTexture(new Uint8Array(G.ni * G.nj * 4), G.ni, G.nj, THREE.RGBAFormat);
+          T.magFilter = T.minFilter = THREE.NearestFilter;
+          T.generateMipmaps = false;
+        }
+        const img = T.image.data, span = hiB - loB;
+        for (let k = 0; k < G.ni * G.nj; k++) {
+          const x = G.raw[k], q = x === x ? Math.round(Math.max(0, Math.min(1, (x - loB) / span)) * 65535) : 0;
+          img[k * 4] = q >> 8; img[k * 4 + 1] = q & 255; img[k * 4 + 3] = 255;
+        }
+        T.needsUpdate = true;
+        uniforms.locTex.value = T;
+        uniforms.locGrid.value.set(G.lon0, G.lat0, G.dlon, G.dlat);
+        uniforms.locSize.value.set(G.ni, G.nj);
+        uniforms.locBands.value = NB;
+        LOC.bands = { lo: loB, hi: hiB, step, NB, colors, name: countries[P.i].n };
+        LOC.G = G;
+        LOC.on = true;
+      }
+    }
+    const lk = LOC.on ? [LOC.bands.name, LOC.bands.lo, LOC.bands.hi, LOC.bands.step, tState.v, tState.show].join('|') : '';
+    if (lk !== LOC.legendKey) { LOC.legendKey = lk; renderLegend(); }
+  }
+  function refreshLocal() {
+    LOC.pts = null;
+    if (lifted) { uniforms.locMix.value = 0; LOC.ease = 0; }   // a new country: its steps fade in again
+    if (tState.v) (lifted ? paintTrends : paintLocal)();   // the native grid's cell values are kept only while lifted
+  }
+  // the switch between the globe's colours and the country's own steps is eased: in over about a second once the
+  // country is well on its way up, out quickly when it goes back
+  localStep = dt => {
+    const u = uniforms.locMix, goal = LOC.on && lifted && lifted.t > 0.3 ? 1 : 0;
+    if (u.value === goal) return;
+    const e = goal ? Math.min(1, LOC.ease + dt / 1.0) : Math.max(0, LOC.ease - dt / 0.35);
+    LOC.ease = e;
+    u.value = e * e * (3 - 2 * e);                    // smoothstep: starts and ends gently
+    if (!goal && e === 0) u.value = 0;
+  };
+  // the shown value at a point of the map (u along longitude, v along latitude, 0..1): its grid cell's own value
+  function valueAtPoint(u, v) {
+    if (LOC.on && lifted && idAt(u, v) === lifted.i) return localAt(LOC.G, u * 360 - 180, v * 180 - 90);
+    if (!hrReady() || !HR.cShown) return null;
+    const px = u * 72 - 0.5, py = Math.max(0, Math.min(35, v * 36 - 0.5));
+    const i0 = Math.floor(px), j0 = Math.floor(py), fx = px - i0, fy = py - j0;
+    let s = 0, w = 0;
+    for (const [dj, di, wt] of [[0, 0, (1 - fx) * (1 - fy)], [0, 1, fx * (1 - fy)], [1, 0, (1 - fx) * fy], [1, 1, fx * fy]]) {
+      const x = HR.cShown[Math.min(35, j0 + dj) * 72 + ((i0 + di) % 72 + 72) % 72];
+      if (x === x) { s += x * wt; w += wt; }
+    }
+    return w > 0.25 ? s / w : null;
+  }
+
+  function paintTrends() {
+    if (!tState.v) LOC.on = false;
+    uniforms.trendOn.value = tState.v ? 1 : 0;
+    uniforms.hrOn.value = hrReady() ? 1 : 0;
+    if (tState.v) { if (hrReady()) paintHR(); else hrLoad(tState.v); }
+    const hasField = !!(tState.v && TL && TL.data[tState.v]);
+    uniforms.fieldOn.value = hasField ? 1 : 0;
+    if (!tState.v) return;
+    if (hasField) paintField();
+    const tm = trendMode();                              // 2026-11-15: forecast years colour countries by their forecast trend
+    for (let i = 0; i < N; i++) {
+      const sr = seriesOf(i);
+      const x = tm ? ftCountry(i) : sr ? shown(sr, tState.year) : null;
+      if (x == null) { trendData[i * 4 + 3] = 0; continue; }
+      const [r, g, b] = tm ? ftColor(x) : colorFor(x);
+      trendData.set([r, g, b, 255], i * 4);
+    }
+    trendTex.needsUpdate = true;
+    paintLocal();
+  }
+
+  function fmt(x, digits) {
+    const d = digits != null ? digits : (tState.v === 'GWETROOT' ? 2 : tState.v === 'PRECTOTCORR' ? 0 : 1);
+    return (Math.round(x * 10 ** d) / 10 ** d).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function shownUnit() {
+    const info = TVARS[tState.v];
+    return tState.show === 'value' ? info.unit : (info.mode === 'pct' ? '%' : info.unit);
+  }
+
+  function renderLegend() {
+    const el = document.getElementById('legend');
+    el.textContent = '';
+    if (!tState.v) return;
+    const info = TVARS[tState.v];
+    const TM = trendMode();                              // 2026-11-15
+    const stops = tState.show === 'value' && !TM ? RAMPS[info.ramp + 'V'] : RAMPS[info.ramp];
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.textContent = tState.show === 'value'
+      ? `${info.label} in ${Math.round(tState.year)} (${info.unit})`
+      : `Change since ${tState.from}–${Math.min(tState.to, tState.from + 4)} (${shownUnit()})`;
+    if (TM) cap.textContent = `Forecast trend in ${FT[tState.v].unit}, the same every year from ${yObs() + 1} to ${yrs(tState.v).max}. The chart has the yearly values.`;
+    else if (Math.round(tState.year) > yObs()) cap.textContent += ' · forecast';
+    if (HR.state[tState.v] === 'loading') cap.textContent += ' · loading detail…';
+    const bar = document.createElement('div');
+    bar.className = 'lbar';
+    bar.style.background = 'linear-gradient(90deg,' + stops.map(([p, c]) => `rgb(${c}) ${p * 100}%`).join(',') + ')';
+    const ticks = document.createElement('div');
+    ticks.className = 'ticks';
+    const [lo, hi] = TM ? [-FT[tState.v].range, FT[tState.v].range] : tState.show === 'value' ? info.value : [-info.change, info.change];
+    const sign = x => ((tState.show === 'change' || TM) && x > 0 ? '+' : '') + fmt(x, Math.abs(hi) < 1 ? 2 : 0);
+    [lo, (lo + hi) / 2, hi].forEach(x => { const s2 = document.createElement('span'); s2.textContent = sign(x); ticks.appendChild(s2); });
+    el.append(cap, bar, ticks);
+    if (LOC.on && LOC.bands) {
+      const B = LOC.bands, dg = B.step < 0.1 ? 2 : B.step < 1 ? 1 : 0;
+      const sg = x => (tState.show === 'change' && x > 0 ? '+' : '') + fmt(x, dg);
+      const cap2 = document.createElement('div');
+      cap2.className = 'cap';
+      cap2.style.marginTop = '10px';
+      cap2.textContent = `${B.name}: its own range, in steps of ${fmt(B.step, dg)} ${shownUnit()}`;
+      const bar2 = document.createElement('div');
+      bar2.className = 'lbar';
+      bar2.style.background = 'linear-gradient(90deg,' + B.colors.map((c, k) => `rgb(${c}) ${k / B.NB * 100}% ${(k + 1) / B.NB * 100}%`).join(',') + ')';
+      const t2 = document.createElement('div');
+      t2.className = 'ticks';
+      const mids = B.NB % 2 === 0 ? [B.lo, B.lo + B.step * B.NB / 2, B.hi] : [B.lo, B.hi];
+      mids.forEach(x => { const s2 = document.createElement('span'); s2.textContent = sg(x); t2.appendChild(s2); });
+      el.append(cap2, bar2, t2);
+    }
+  }
+
+  // OLS slope over the range, per decade
+  function perDecade(series) {
+    const pts = [];
+    for (let y = tState.from; y <= Math.min(tState.to, yObs()); y++) if (series[y - Y0] != null) pts.push([y, series[y - Y0]]);
+    if (pts.length < 3) return null;
+    const mx = pts.reduce((a, p) => a + p[0], 0) / pts.length, my = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+    let num = 0, den = 0;
+    for (const [x, y] of pts) { num += (x - mx) * (y - my); den += (x - mx) ** 2; }
+    return { slope: num / den * 10, mx, my, b: num / den };
+  }
+
+  function renderTrendDetail() {
+    renderChart();
+    renderCropPanel();   // 2026-11-15
+    const el = document.getElementById('tdetail');
+    el.textContent = '';
+    if (!tState.v) { el.textContent = 'Choose a trend to colour the map.'; return; }
+    if (selected < 0) { el.textContent = 'Point at the map for local values. Select a country to see its series.'; return; }
+    const c = countries[selected], sr = seriesOf(selected), info = TVARS[tState.v];
+    const title = document.createElement('b');
+    title.textContent = c.n;
+    el.appendChild(title);
+    if (!sr) { el.appendChild(document.createTextNode(' — no data')); return; }
+
+    const row = (k, v) => { const r = document.createElement('div'); r.className = 'row'; const a = document.createElement('span'); a.textContent = k; const b = document.createElement('span'); b.textContent = v; r.append(a, b); el.appendChild(r); };
+    const v = valueAt(sr, tState.year), ch = shown(sr, tState.year);
+    const fit = perDecade(sr);
+    row(`${Math.round(tState.year)}${yearTag(Math.round(tState.year))}`, v == null ? '—' : `${fmt(v)} ${info.unit}`);
+    if (f5[tState.v]) {
+      const B = t5Band(selected, f5[tState.v]), k = Math.round(tState.year) - Y0;
+      if (B.lo[k] != null) row('80% range', `${fmt(B.lo[k])} to ${fmt(B.hi[k])} ${info.unit}`);
+    }
+    if (tState.show === 'change' && ch != null) row('Change', `${ch > 0 ? '+' : ''}${fmt(ch)} ${TVARS[tState.v].mode === 'pct' ? '%' : TVARS[tState.v].unit}`);
+    if (trendMode()) { const x = ftCountry(selected); if (x != null) row('Forecast trend', `${x > 0 ? '+' : ''}${fmt(x, 2)} ${FT[tState.v].unit}`); }   // 2026-11-15
+    if (fit) row(`Trend ${tState.from}–${Math.min(tState.to, yObs())}`, `${fit.slope > 0 ? '+' : ''}${fmt(fit.slope, tState.v === 'GWETROOT' ? 3 : 2)} ${info.unit}/decade`);
+
+  }
+
+  // ---- 2026-11-15: is the trend significant? Mann-Kendall with the Hamed & Rao (1998) correction for runs of similar years, ported
+  // unchanged from EarthTrend TEST src/lib/engine/stats.js (normCdf, ranks, theilSen, mannKendall, mkHamedRao). Scientists call a trend
+  // significant at p < 0.05: a rise or fall this steady would come from year-to-year chance alone fewer than 1 time in 20. ----
+  const SIG = (() => {
+    const isN = x => typeof x === 'number' && isFinite(x);
+    const normCdf = z => { const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z / 2); return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y); };
+    const ranks = a => { const idx = a.map((v, i) => [v, i]).filter(([v]) => isN(v)).sort((p, q) => p[0] - q[0]), r = Array(a.length).fill(NaN); for (let i = 0; i < idx.length;) { let j = i; while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++; const avg = (i + j) / 2 + 1; for (let k = i; k <= j; k++) r[idx[k][1]] = avg; i = j + 1; } return r; };
+    const median = a => { const b = a.slice().sort((p, q) => p - q), n = b.length; return n % 2 ? b[(n - 1) / 2] : (b[n / 2 - 1] + b[n / 2]) / 2; };
+    const theilSen = (x, y) => { const sl = []; for (let i = 0; i < x.length; i++) if (isN(y[i])) for (let j = i + 1; j < x.length; j++) if (isN(y[j]) && x[j] !== x[i]) sl.push((y[j] - y[i]) / (x[j] - x[i])); if (sl.length < 6) return { slope: NaN }; return { slope: median(sl) }; };
+    const mannKendall = y => { const v = y.filter(isN), n = v.length; let S = 0; for (let i = 0; i < n - 1; i++) for (let j = i + 1; j < n; j++) S += Math.sign(v[j] - v[i]); const c = new Map(); for (const t of v) c.set(t, (c.get(t) || 0) + 1); let tie = 0; for (const k of c.values()) if (k > 1) tie += k * (k - 1) * (2 * k + 5); const varS = (n * (n - 1) * (2 * n + 5) - tie) / 18; const z = varS > 0 ? (S === 0 ? 0 : (S - Math.sign(S)) / Math.sqrt(varS)) : 0; return { n, S, varS, z, p: 2 * (1 - normCdf(Math.abs(z))) }; };
+    return (x, y) => {
+      const mk0 = mannKendall(y), ts = theilSen(x, y);
+      if (!isN(ts.slope)) return { ...mk0, slope: NaN };
+      const det = y.map((v, i) => (isN(v) ? v - ts.slope * x[i] : NaN)).filter(isN), n = det.length, rk = ranks(det);
+      const m = rk.reduce((a, b) => a + b, 0) / n, den = rk.reduce((a, b) => a + (b - m) ** 2, 0), lim = 1.96 / Math.sqrt(n);
+      let sum = 0;
+      for (let k = 1; k < n - 1; k++) { let num = 0; for (let i = 0; i + k < n; i++) num += (rk[i] - m) * (rk[i + k] - m); const rho = num / den; if (Math.abs(rho) > lim) sum += (n - k) * (n - k - 1) * (n - k - 2) * rho; }
+      const factor = Math.max(1, 1 + (2 / (n * (n - 1) * (n - 2))) * sum), varS = mk0.varS * factor;
+      const z = mk0.S === 0 ? 0 : (mk0.S - Math.sign(mk0.S)) / Math.sqrt(varS);
+      return { ...mk0, varS, z, p: 2 * (1 - normCdf(Math.abs(z))), slope: ts.slope, factor };
+    };
+  })();
+  function sigText(sr) {                                   // the sentence under the chart, from the measured years of the range only
+    const yo = Math.min(tState.to, yObs()), xs = [], ys = [];
+    const part = (RAW5[tState.v] && RAW5[tState.v].partial) || {};   // years only partly measured (2026 to September; 1990 temperature from 2 months)
+    for (let y = tState.from; y <= yo; y++) { const v = sr[y - Y0]; if (v != null && !part[y]) { xs.push(y); ys.push(v); } }
+    const half = Object.keys(part).map(Number).filter(y => y >= tState.from && y <= tState.to), skip = [];
+    if (tState.to > yObs()) skip.push('the forecast years');
+    if (half.length) skip.push(half.join(' and ') + ' (only partly measured)');
+    const fc = skip.length ? ` Left out: ${skip.join(', and ')}.` : '';
+    if (xs.length < 10) return `<b class="no">Too few years to judge.</b> <span class="m">${xs.length} measured years in this range; the test needs at least 10.${fc}</span>`;
+    const r = SIG(xs, ys), p = r.p, way = r.S > 0 ? 'rise' : r.S < 0 ? 'fall' : 'change';
+    const odds = q => (q < 0.001 ? 'fewer than 1 time in 1,000' : `about 1 time in ${Math.max(2, Math.round(1 / q)).toLocaleString('en-US')}`);
+    const pTxt = p < 0.001 ? 'p < 0.001' : `p ${p.toFixed(3)}`;
+    return p < 0.05
+      ? `<b class="yes">Scientists would call this significant.</b> A ${way} this steady would come from year-to-year chance ${odds(p)}. <span class="m">Mann-Kendall test, corrected for runs of similar years: ${pTxt}, ${xs.length} measured years ${xs[0]} to ${xs[xs.length - 1]}.${fc}</span>`
+      : `<b class="no">Not significant.</b> Year-to-year wiggles alone would draw a ${way} like this ${odds(p)}; scientists want fewer than 1 in 20. <span class="m">Mann-Kendall test, corrected for runs of similar years: ${pTxt}, ${xs.length} measured years ${xs[0]} to ${xs[xs.length - 1]}.${fc}</span>`;
+  }
+
+  // ---- chart: the selected country's yearly series over the year range, as the map shows it ----
+  // one series (accent line), OLS trend in muted ink, the current year marked, crosshair + readout on hover
+  function niceTicks(lo, hi, n) {
+    const span = hi - lo, raw = span / Math.max(1, n), mag = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(k => k >= raw) || 10 * mag;
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-6; v += step) out.push(+v.toFixed(10));
+    return { ticks: out, step };
+  }
+  function renderChart() {
+    const chartEl = document.getElementById('tchart'), css = getComputedStyle(document.documentElement);
+    const ACC = css.getPropertyValue('--accent').trim() || '#3b82f6', MUTED = css.getPropertyValue('--muted').trim() || '#8d9bb0';
+    const SURF = css.getPropertyValue('--panel').trim() || '#0a101b';
+    chartEl.textContent = '';
+    const head = document.createElement('div'); head.className = 'ch-head';
+    const title = document.createElement('div'); title.className = 'ch-title';
+    head.appendChild(title); chartEl.appendChild(head);
+    if (!tState.v || selected < 0) {
+      title.textContent = 'Chart';
+      const e = document.createElement('div'); e.className = 'ch-empty';
+      e.textContent = !tState.v ? 'Choose a trend, then select a country to chart it year by year.' : 'Select a country on the map to chart it year by year.';
+      chartEl.appendChild(e);
+      return;
+    }
+    const info = TVARS[tState.v], sr = seriesOf(selected), unit = shownUnit(), change = tState.show === 'change';
+    title.textContent = countries[selected].n + ' · ' + info.label;
+    const sub = document.createElement('div'); sub.className = 'ch-sub';
+    sub.textContent = (change ? 'Change since ' + tState.from + '–' + Math.min(tState.to, tState.from + 4) : 'Yearly mean') + ', ' + tState.from + '–' + tState.to + ' (' + unit + ')'
+      + (tState.to > yObs() ? ' · dashed: forecast, shaded: its 80% range' + (TU && tState.v === 'T2M' ? ', dotted orange: Upcoming Years' : '') : '');
+    chartEl.appendChild(sub);
+    const pts = [];
+    if (sr) for (let y = tState.from; y <= tState.to; y++) { const x = shown(sr, y); if (x != null) pts.push([y, x]); }
+    if (pts.length < 2) {
+      const e = document.createElement('div'); e.className = 'ch-empty'; e.textContent = 'No data for this country.';
+      chartEl.appendChild(e); return;
+    }
+    const read = document.createElement('div'); read.className = 'ch-read'; head.appendChild(read);
+    const fmtV = x => (change && x > 0 ? '+' : '') + fmt(x) + (unit === '0–1' ? '' : ' ' + unit);
+
+    // geometry in real pixels, so text and lines are crisp at any panel width
+    const NS = 'http://www.w3.org/2000/svg';
+    const W = Math.max(200, chartEl.clientWidth - 24), H = 170, L = 40, R = 10, Tp = 10, B = 20;
+    const band = [];                                       // [year, low, high] of the forecast's 80% range
+    if (f5[tState.v]) {
+      const B = t5Band(selected, f5[tState.v]), b0 = change ? baseline(sr) : 0, pc = change && info.mode === 'pct' && b0;
+      const tr = x => (pc ? (x - b0) / Math.abs(b0) * 100 : x - b0);
+      for (let y = tState.from; y <= tState.to; y++) if (B.lo[y - Y0] != null) band.push([y, tr(B.lo[y - Y0]), tr(B.hi[y - Y0])]);
+    }
+    // 2026-11-15: the second temperature forecast (Upcoming Years Temp) as its own dashed line
+    const up = [];
+    if (TU && tState.v === 'T2M') {
+      const U = upcomingOf(selected), b0 = change ? baseline(sr) : 0;
+      if (U) for (let y = Math.max(tState.from, TU.years[0]); y <= tState.to; y++) if (U[y - Y0] != null) up.push([y, U[y - Y0] - b0]);
+    }
+    let lo = Math.min(...pts.map(p => p[1]), ...band.map(b => b[1]), ...up.map(p => p[1])), hi = Math.max(...pts.map(p => p[1]), ...band.map(b => b[2]), ...up.map(p => p[1]));
+    if (change) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }   // keep the zero line in view
+    if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    const { ticks } = niceTicks(lo, hi, 4);
+    const X = y => L + (y - tState.from) / Math.max(1, tState.to - tState.from) * (W - L - R);
+    const Y = v => Tp + (1 - (v - lo) / (hi - lo)) * (H - Tp - B);
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', `${countries[selected].n}, ${info.label} ${change ? 'change' : 'yearly mean'} ${tState.from} to ${tState.to}`);
+    const mk = (tag, attrs, parent = svg) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; };
+    // grid and y labels (hairline, recessive); the zero line a step stronger in "Change"
+    const digits = Math.abs(ticks[1] - ticks[0]) < 1 ? (Math.abs(ticks[1] - ticks[0]) < 0.1 ? 2 : 1) : 0;
+    for (const t of ticks) {
+      const y = Y(t);
+      if (y < Tp - 1 || y > H - B + 1) continue;
+      mk('line', { x1: L, x2: W - R, y1: y, y2: y, stroke: change && Math.abs(t) < 1e-9 ? cssv('--chart-zero') : cssv('--chart-grid'), 'stroke-width': 1, 'shape-rendering': 'crispEdges' });
+      const tx = mk('text', { x: L - 6, y: y + 3.5, 'text-anchor': 'end' });
+      tx.textContent = (change && t > 0 ? '+' : '') + fmt(t, digits);
+    }
+    // x labels: start, decades, end
+    const xs = [tState.from];
+    for (let y = Math.ceil((tState.from + 1) / 10) * 10; y < tState.to; y += 10) if (y - tState.from >= 4 && tState.to - y >= 4) xs.push(y);
+    if (tState.to !== tState.from) xs.push(tState.to);
+    for (const y of xs) {
+      const tx = mk('text', { x: X(y), y: H - 5, 'text-anchor': y === tState.from ? 'start' : y === tState.to ? 'end' : 'middle' });
+      tx.textContent = y;
+    }
+    // area wash, trend, the series
+    // observed years: solid line; forecast years: dashed, joined to the last observed year, inside the shaded
+    // 80% range of the forecast
+    const YO = yObs(), obs = pts.filter(p => p[0] <= YO), proj = pts.filter(p => p[0] > YO);
+    if (band.length > 1) mk('polygon', { points: band.map(b => `${X(b[0]).toFixed(1)},${Y(b[1]).toFixed(1)}`).concat(band.slice().reverse().map(b => `${X(b[0]).toFixed(1)},${Y(b[2]).toFixed(1)}`)).join(' '), fill: 'rgba(59,130,246,.2)' });
+    if (proj.length && obs.length) proj.unshift(obs[obs.length - 1]);
+    const lineOf = a => a.map(([y, v]) => `${X(y).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+    const base = Y(change ? 0 : lo);
+    const wash = (a, fill) => { if (a.length > 1) mk('polygon', { points: `${X(a[0][0])},${base} ${lineOf(a)} ${X(a[a.length - 1][0])},${base}`, fill }); };
+    wash(obs, 'rgba(59,130,246,.12)');
+    if (band.length < 2) wash(proj, 'rgba(59,130,246,.05)');
+    const fit = (() => {
+      const n = obs.length;
+      if (n < 3) return null;
+      const mx = obs.reduce((a, p) => a + p[0], 0) / n, my = obs.reduce((a, p) => a + p[1], 0) / n;
+      let num = 0, den = 0;
+      for (const [x, v] of obs) { num += (x - mx) * (v - my); den += (x - mx) ** 2; }
+      return den ? { b: num / den, mx, my } : null;
+    })();
+    const fitTo = Math.min(tState.to, YO);
+    if (fit) mk('line', { x1: X(tState.from), y1: Y(fit.my + fit.b * (tState.from - fit.mx)), x2: X(fitTo), y2: Y(fit.my + fit.b * (fitTo - fit.mx)), stroke: MUTED, 'stroke-width': 1.25, opacity: .8 });
+    if (obs.length > 1) mk('polyline', { points: lineOf(obs), fill: 'none', stroke: ACC, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+    if (proj.length > 1) mk('polyline', { points: lineOf(proj), fill: 'none', stroke: ACC, 'stroke-width': 2, 'stroke-dasharray': '5 4', 'stroke-linejoin': 'round' });
+    if (up.length > 1) mk('polyline', { points: lineOf(up), fill: 'none', stroke: '#e0a43c', 'stroke-width': 1.6, 'stroke-dasharray': '2 3', 'stroke-linejoin': 'round' });   // 2026-11-15
+    // the current year: hairline + dot with a surface ring, and its value as the one direct label
+    const cy = Math.round(tState.year), cur = pts.find(p => p[0] === cy);
+    if (cur) {
+      mk('line', { x1: X(cy), x2: X(cy), y1: Tp, y2: H - B, stroke: cssv('--chart-zero'), 'stroke-width': 1, 'shape-rendering': 'crispEdges' });
+      mk('circle', { cx: X(cy), cy: Y(cur[1]), r: 4.5, fill: ACC, stroke: SURF, 'stroke-width': 2 });
+      const right = X(cy) > W - 70;
+      const lab = mk('text', { x: X(cy) + (right ? -8 : 8), y: Math.max(Tp + 9, Y(cur[1]) - 8), 'text-anchor': right ? 'end' : 'start', class: 'lab' });
+      lab.textContent = fmtV(cur[1]);
+    }
+    // hover: a crosshair snapping to the nearest year, with the readout in the header
+    const hover = mk('g', { visibility: 'hidden' });
+    const hl = mk('line', { y1: Tp, y2: H - B, stroke: cssv('--chart-cross'), 'stroke-width': 1, 'shape-rendering': 'crispEdges' }, hover);
+    const hd = mk('circle', { r: 4.5, fill: ACC, stroke: SURF, 'stroke-width': 2 }, hover);
+    const showRead = p => {
+      read.textContent = '';
+      const y = document.createElement('span'); y.textContent = p[0] + yearTag(p[0]);
+      read.append(y, document.createTextNode(fmtV(p[1])));
+    };
+    const fitText = fit ? `${fit.b * 10 > 0 ? '+' : ''}${fmt(fit.b * 10, tState.v === 'GWETROOT' ? 3 : 2)} ${unit}/decade` : '';
+    const idle = () => { read.textContent = ''; if (fitText) { const k = document.createElement('span'); k.textContent = 'Trend'; read.append(k, document.createTextNode(fitText)); } };
+    const at = clientX => {
+      const r = svg.getBoundingClientRect(), x = (clientX - r.left) / r.width * W;
+      const yr = Math.round(tState.from + (x - L) / (W - L - R) * (tState.to - tState.from));
+      return pts.reduce((a, p) => (Math.abs(p[0] - yr) < Math.abs(a[0] - yr) ? p : a));
+    };
+    const move = e => {
+      const p = at(e.clientX);
+      renderChart.hover = p[0];
+      hl.setAttribute('x1', X(p[0])); hl.setAttribute('x2', X(p[0]));
+      hd.setAttribute('cx', X(p[0])); hd.setAttribute('cy', Y(p[1]));
+      hover.setAttribute('visibility', 'visible');
+      showRead(p);
+    };
+    mk('rect', { x: L, y: 0, width: W - L - R, height: H - B, fill: 'transparent' }).addEventListener('pointermove', move);
+    svg.addEventListener('pointerleave', () => { renderChart.hover = null; hover.setAttribute('visibility', 'hidden'); idle(); });
+    // a click on the chart moves the timeline to that year
+    svg.addEventListener('click', e => { const p = at(e.clientX); setPlaying(false); tState.year = p[0]; refreshTrends(false); });
+    chartEl.appendChild(svg);
+    { const sig = document.createElement('div'); sig.className = 'ch-sig'; sig.innerHTML = sigText(sr); chartEl.appendChild(sig); }   // 2026-11-15
+    if (renderChart.hover != null) { const p = pts.find(q => q[0] === renderChart.hover); if (p) { move({ clientX: svg.getBoundingClientRect().left + X(p[0]) / W * svg.getBoundingClientRect().width }); } else idle(); }
+    else idle();
+  }
+  // 2026-11-15: the bottom-right panel is the CROP DETECTOR (the political model's machinery turned into a crop shortfall warning,
+  // TEST suite 42): each crop's chance of a production shortfall next season, and the years that fell short
+  // (function declarations and window.CROPBOT, so renderChart works even if it runs before this point of the script)
+  function cssv(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }   // 2026-11-15: a colour variable's value, for SVG and WebGL
+  function cropName(c, cap) { const n = c.replace(/_/g, ' ').replace('soya beans', 'soybeans'); return cap ? n[0].toUpperCase() + n.slice(1) : n; }
+  function escH(x) { return String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function depBars(dep, y0, h, W = 600) {                // production vs its own trend, %; shortfall years (<= -10 %) in red
+    const H = h, L = 34, R = 4, T = 6, B = 16, v = dep.filter(x => x != null);
+    if (v.length < 3) return '';
+    const lo = Math.min(-15, ...v), hi = Math.max(15, ...v), n = dep.length, bw = (W - L - R) / n, Y = x => T + (1 - (x - lo) / (hi - lo)) * (H - T - B);
+    let g = `<line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" stroke="${cssv('--chart-zero')}"/><line x1="${L}" x2="${W - R}" y1="${Y(-10)}" y2="${Y(-10)}" stroke="rgba(224,100,74,.45)" stroke-dasharray="3 3"/>`
+      + `<text x="${L - 4}" y="${Y(0) + 3.5}" text-anchor="end">0</text><text x="${L - 4}" y="${Y(-10) + 3.5}" text-anchor="end">-10%</text>`;
+    dep.forEach((x, k) => { if (x == null) return; const y = Y(Math.max(0, x)), hh = Math.abs(Y(x) - Y(0)); g += `<rect x="${(L + k * bw + 0.5).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${Math.max(0.5, hh).toFixed(1)}" fill="${x <= -10 ? '#e0644a' : 'rgba(59,130,246,.7)'}"><title>${y0 + k}: ${x > 0 ? '+' : ''}${x} %</title></rect>`; });
+    for (const yr of [y0, 2000, 2010, y0 + n - 1]) g += `<text x="${(L + (yr - y0 + 0.5) * bw).toFixed(1)}" y="${H - 3}" text-anchor="middle">${yr}</text>`;
+    return `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">${g}</svg>`;
+  }
+  function renderCropPanel() {
+    const el = document.getElementById('cropBody');
+    el.textContent = '';
+    if (selected < 0) { el.innerHTML = '<div class="ch-head"><div class="ch-title">Crop detector</div></div><div class="ch-empty">Pick a country and its harvests show up here.</div>'; return; }
+    const CB = window.CROPBOT || null, c = countries[selected], C = CB && CB.countries[c.a];
+    let h = `<div class="ch-head"><div class="ch-title">${escH(c.n)} · Crop detector</div></div>`;
+    if (!C) { el.innerHTML = h + '<div class="ch-empty">No crop record for this country: the detector needs 28 years of harvests and at least 50,000 ha of wheat, maize, rice, soybeans, barley, sorghum or millet.</div>'; return; }
+    const crops = Object.entries(C).sort((a, b) => b[1].p - a[1].p), main = Object.entries(C).sort((a, b) => (b[1].lastProdT || 0) - (a[1].lastProdT || 0))[0];
+    h += `<div class="ch-sub">Chance that the ${CB.forYear} harvest lands 10 % or more under its trend</div><div class="cb-rows">`
+      + crops.map(([k, v]) => `<div class="cb-row"><span>${cropName(k)}</span><i style="width:${Math.round(100 * Math.min(1, v.p / 0.5))}%"></i><b>${Math.round(100 * v.p)} %</b><em>${v.observedRate2011_24 == null ? '' : 'seen ' + Math.round(100 * v.observedRate2011_24) + ' %'}</em></div>`).join('') + '</div>'
+      + `<div class="ch-sub" style="margin-top:6px">${cropName(main[0], true)}, each harvest against its trend, ${main[1].y0} to ${CB.yearsTo}. Red years fell short.</div>` + depBars(main[1].departure, main[1].y0, 90, 300)
+      + `<div class="cb-note">Seen: how often 2011 to ${CB.yearsTo} fell short. The detector is good at where, blind to when.</div>`;
+    el.innerHTML = h;
+  }
+  new ResizeObserver(() => renderChart()).observe(document.getElementById('tchart'));
+  // 2026-11-15: the crop detector panel, bottom right, its height set by dragging its top edge (kept between visits, double-click resets)
+  {
+    const box = document.getElementById('cropbot'), grip = document.getElementById('cropGrip'), CROP_DEF = 250;
+    const maxH = () => Math.max(140, Math.round(window.innerHeight * 0.75));
+    const setH = h => { h = Math.round(Math.max(120, Math.min(maxH(), h))); box.style.height = h + 'px'; grip.setAttribute('aria-valuenow', h); return h; };
+    let cropH = CROP_DEF; try { cropH = +localStorage.getItem('cropH') || CROP_DEF; } catch (e) {}
+    cropH = setH(cropH);
+    const save = () => { try { localStorage.setItem('cropH', cropH); } catch (e) {} };
+    let y0 = 0, h0 = 0;
+    grip.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); y0 = e.clientY; h0 = box.getBoundingClientRect().height; grip.setPointerCapture(e.pointerId); grip.classList.add('drag'); });
+    grip.addEventListener('pointermove', e => { if (grip.classList.contains('drag')) cropH = setH(h0 + (y0 - e.clientY)); });
+    const end = () => { if (grip.classList.contains('drag')) { grip.classList.remove('drag'); save(); } };
+    grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+    grip.addEventListener('dblclick', () => { cropH = setH(CROP_DEF); save(); });
+    grip.addEventListener('keydown', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); cropH = setH(cropH + (e.key === 'ArrowUp' ? 20 : -20)); save(); } });
+    new ResizeObserver(() => renderCropPanel()).observe(box);
+  }
+  // 2026-11-15: country pop-up over the globe (Expand under the chart): the selected country's rain and air temperature, observed and
+  // forecast, from the globe's own 5-degree cells. (Cause-of-death and political results were removed: they found nothing useful.)
+  const botPop = document.getElementById('botPop'), botSheet = document.getElementById('botSheet');
+  const esc = x => String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function lineSvg(series, opt) {                         // series: [{ pts: [[x, y]], color, dash, band: [[x, lo, hi]] }]
+    const W = 700, H = opt.h || 170, L = 46, R = 10, T = 10, B = 20, all = series.flatMap(s => s.pts.concat((s.band || []).flatMap(b => [[b[0], b[1]], [b[0], b[2]]])));
+    if (all.length < 2) return '';
+    const x0 = Math.min(...all.map(p => p[0])), x1 = Math.max(...all.map(p => p[0]));
+    let lo = Math.min(...all.map(p => p[1])), hi = Math.max(...all.map(p => p[1])); const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+    const X = x => L + (x - x0) / Math.max(1, x1 - x0) * (W - L - R), Y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    const { ticks } = niceTicks(lo, hi, 4); let g = '';
+    for (const t of ticks) if (Y(t) >= T - 1 && Y(t) <= H - B + 1) g += `<line x1="${L}" x2="${W - R}" y1="${Y(t)}" y2="${Y(t)}" stroke="${cssv('--chart-grid')}"/><text x="${L - 6}" y="${Y(t) + 3.5}" text-anchor="end">${fmt(t, Math.abs(ticks[1] - ticks[0]) < 1 ? 1 : 0)}</text>`;
+    for (const y of [x0, ...[1990, 2000, 2010, 2020, 2030, 2040, 2050].filter(v => v - x0 >= 4 && x1 - v >= 4), x1]) g += `<text x="${X(y)}" y="${H - 5}" text-anchor="middle">${y}</text>`;
+    for (const s of series) {
+      if (s.band && s.band.length > 1) g += `<polygon fill="rgba(59,130,246,.18)" points="${s.band.map(b => `${X(b[0])},${Y(b[1])}`).concat(s.band.slice().reverse().map(b => `${X(b[0])},${Y(b[2])}`)).join(' ')}"/>`;
+      if (s.pts.length > 1) g += `<polyline fill="none" stroke="${s.color}" stroke-width="${s.w || 2}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''} points="${s.pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}"/>`;
+    }
+    return `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">${g}</svg>`;
+  }
+  function forecastBlock(i) {                              // the country's rain and temperature, observed + both forecasts
+    if (!t5 || !t5.cellsOf[i]) return '<p class="m">This country falls between the 5° cells, so it has no series.</p>';
+    const out = [];
+    for (const v of ['T2M', 'PRECTOTCORR']) {
+      const F = f5[v]; if (!F) continue;
+      const sr = (T.data[countries[i].d] || {})[v], B = t5Band(i, F), R = RAW5[v], obs = [], proj = [], band = [], up = [];
+      if (!sr) continue;
+      for (let y = R.years[0]; y <= R.projected[1]; y++) { const x = sr[y - Y0]; if (x == null) continue; (y <= R.years[1] ? obs : proj).push([y, x]); if (B.lo[y - Y0] != null) band.push([y, B.lo[y - Y0], B.hi[y - Y0]]); }
+      if (proj.length && obs.length) proj.unshift(obs[obs.length - 1]);
+      if (v === 'T2M' && TU) { const U = upcomingOf(i); for (let y = TU.years[0]; y <= TU.years[1]; y++) if (U[y - Y0] != null) up.push([y, U[y - Y0]]); }
+      const at = y => sr[y - Y0], d = v === 'T2M' ? 2 : 0;
+      out.push(`<p><b>${TVARS[v].label}</b> <span class="m">(${TVARS[v].unit}). Solid line measured, dashed line forecast with its 80 % range${up.length ? ', dotted orange the Upcoming Years forecast' : ''}.</span></p>`
+        + lineSvg([{ pts: obs, color: 'var(--accent)' }, { pts: proj, color: 'var(--accent)', dash: '5 4', band }, { pts: up, color: '#e0a43c', dash: '2 3', w: 1.6 }], { h: 140 })
+        + `<p class="m">2025 ${fmt(at(2025), d)} · 2030 ${fmt(at(2030), d)} · 2050 ${fmt(at(2050), d)}${up.length ? ` · Upcoming Years 2050 ${fmt(up[up.length - 1][1], d)}` : ''}</p>`);
+    }
+    return out.join('') + '<p class="m">The country is the average of the 5° cells its land points sit in. Forecasts: Realistic Forecast, Rain Forecast Data and Upcoming Years Temp.</p>';
+  }
+  function renderBot(i) {
+    const CB = window.CROPBOT || null, C = CB && CB.countries[countries[i].a], V = CB && CB.validation;
+    let crop = '<h3>Crop detector</h3>';
+    if (!C) crop += '<p class="m">No crop record for this country: the detector needs 28 years of harvests and at least 50,000 ha of wheat, maize, rice, soybeans, barley, sorghum or millet.</p>';
+    else {
+      crop += `<p class="m">Each crop's chance of a ${CB.forYear} harvest 10 % or more under its own trend, and every harvest since ${Object.values(C)[0].y0} against that trend. Red years fell short.</p>`;
+      for (const [k, v] of Object.entries(C).sort((a, b) => b[1].p - a[1].p)) crop += `<p><b>${cropName(k, true)}</b>: ${Math.round(100 * v.p)} % chance in ${CB.forYear}<span class="m">, fell short in ${v.observedRate2011_24 == null ? '–' : Math.round(100 * v.observedRate2011_24) + ' %'} of the years 2011 to ${CB.yearsTo}</span></p>` + depBars(v.departure, v.y0, 110);
+      crop += `<p class="m">How it was tested: trained on harvests up to ${V.trainedTo}, scored on ${V.testYears}, years it never saw. Across countries it ranks crops well (AUC ${V.auc}) and beats each crop's usual rate (Brier skill ${V.brierSkill}, lower bound ${V.brierSkillLo}). Inside one country it cannot pick the bad year (AUC ${V.withinCountryAuc}, a coin scores 0.5): the signal is how bumpy a crop's past has been. Soil moisture before sowing, El Niño and prices added nothing. Built from the political model's machinery, retrained on harvests.</p>`;
+    }
+    botSheet.innerHTML = `<header><h2 id="botTitle">${esc(countries[i].n)}</h2><span class="k">Crop detector</span><button id="botClose">Close</button></header>` + crop + '<h3>Rain and air temperature</h3>' + forecastBlock(i);
+    document.getElementById('botClose').addEventListener('click', () => { botPop.hidden = true; });
+  }
+  function openBotPopup() { if (selected < 0) return; botPop.hidden = false; renderBot(selected); }
+  document.getElementById('botExpand').addEventListener('click', openBotPopup);
+  botPop.addEventListener('pointerdown', e => { if (e.target === botPop) botPop.hidden = true; });   // a press on the dimmed globe closes it
+
+  function renderTrendPanel() {
+    const box = document.getElementById('tvars');
+    box.textContent = '';
+    [['None', null]].concat(Object.keys(TVARS).map(k => [TVARS[k].label, k])).forEach(([label, key]) => {
+      const b = document.createElement('button');
+      b.setAttribute('aria-pressed', String(tState.v === key));
+      b.disabled = !!key && !T;
+      const l = document.createElement('span'); l.textContent = label;
+      b.appendChild(l);
+      if (key) { const u = document.createElement('span'); u.className = 'u'; u.textContent = TVARS[key].unit; b.appendChild(u); }
+      b.addEventListener('click', () => { tState.v = key; refreshTrends(true); });
+      if (key) b.addEventListener('pointerenter', () => hrLoad(key));   // start loading its sharp map before the click
+      box.appendChild(b);
+    });
+    document.getElementById('showChange').setAttribute('aria-pressed', String(tState.show === 'change'));
+    document.getElementById('showValue').setAttribute('aria-pressed', String(tState.show === 'value'));
+    document.getElementById('showChange').disabled = document.getElementById('showValue').disabled = !tState.v;
+    document.getElementById('tsrc').textContent = !T ? 'Trend data (vendor/trends.js) not found.'
+      : hrReady() ? 'NASA POWER yearly means (MERRA-2 / CERES) on a 5° × 5° grid: each cell is the mean of the native 0.5° × 0.625° cells over land inside it, blended smoothly into its neighbours, borders ignored. The country series is the country average. Sunlight starts in 1984.'
+      : TL ? 'NASA POWER yearly means (MERRA-2 / CERES) at ' + TL.points.length + ' land points (mostly 2.5° apart), blended smoothly between points, borders ignored. The country series is the country average. Sunlight starts in 1984.'
+      : 'NASA POWER yearly means (MERRA-2 / CERES), sampled at points inside each country. Sunlight starts in 1984.';
+    if (T && t5 && tState.v === 'T2M') document.getElementById('tsrc').textContent = 'NASA POWER monthly air temperature (MERRA-2), averaged over 5° × 5° cells and over each year, '
+      + T5.years[0] + '–' + T5.years[1] + ', blended smoothly between cells, borders ignored. The country series is the mean of the cells its land lies in. '
+      + '1990 has only November and December and is estimated from them against each cell\u2019s usual seasonal cycle. 2026 is observed to September, forecast after. '
+      + 'Years after ' + T5.years[1] + ' (under \u201cForecast\u201d in the year range) are a statistical forecast, not observations: seasonal cycle, the level of the last 20 years and each cell\u2019s trend pooled with its neighbours, with an 80% range for natural year-to-year swings.'
+      + (TU ? ' Dotted orange in the chart: the Upcoming Years forecast, a straight line plus a three-year cycle fitted to the monthly record.' : '');
+    if (T && f5.PRECTOTCORR && tState.v === 'PRECTOTCORR') document.getElementById('tsrc').textContent = 'NASA POWER corrected precipitation (PRECTOTCORR), monthly, summed over each year on 5\u00b0 \u00d7 5\u00b0 cells, '   // 2026-11-15
+      + RAIN5.years[0] + '\u2013' + RAIN5.years[1] + '; 2026 is observed to September, forecast after. The country series is the mean of the cells its land lies in. '
+      + 'Years after ' + RAIN5.years[1] + ' are a statistical forecast (Rain Forecast Data.json): monthly climatology \u00d7 (level of the last 20 years + relative trend pooled with neighbouring cells, factor kept between 0.3 and 3), with an 80% range. Single wet or dry years cannot be forecast, only the drift.';
+  }
+
+  function renderTimeline() {
+    tYear.min = tState.from; tYear.max = tState.to;
+    tYear.value = Math.round(tState.year);
+    tYearOut.textContent = Math.round(tState.year);
+    tYearOut.classList.toggle('proj', Math.round(tState.year) > yObs());
+    document.getElementById('tStart').textContent = tState.from;
+    document.getElementById('tEnd').textContent = tState.to;
+    const off = !tState.v;                                // nothing to play until a trend is chosen
+    if (off && tState.playing) setPlaying(false);
+    document.querySelector('.timeline').classList.toggle('off', off);
+    playBtn.disabled = tYear.disabled = off;
+    playBtn.title = off ? 'Choose a trend first' : 'Play / pause (Space)';
+    tYear.title = off ? 'Choose a trend first' : 'Year (← → step one year)';
+  }
+
+  function refreshTrends(panelToo) {
+    syncYears();
+    if (panelToo) renderTrendPanel();
+    renderTimeline();
+    paintTrends();
+    if (panelToo && lifted && !tState.v) loadHi(lifted);   // back from the trend map: sharp imagery again
+    renderLegend();
+    renderTrendDetail();
+  }
+
+  function setRange() {
+    let a = +yFrom.value, b = +yTo.value;
+    if (a > b) { if (this === yFrom) b = a; else a = b; }
+    yFrom.value = a; yTo.value = b;
+    tState.from = a; tState.to = b;
+    tState.year = Math.max(a, Math.min(b, tState.year));
+    refreshTrends(false);
+  }
+  yFrom.addEventListener('change', setRange);
+  yTo.addEventListener('change', setRange);
+  tYear.addEventListener('input', () => { setPlaying(false); tState.year = +tYear.value; refreshTrends(false); });
+  document.getElementById('showChange').addEventListener('click', () => { tState.show = 'change'; refreshTrends(true); });
+  document.getElementById('showValue').addEventListener('click', () => { tState.show = 'value'; refreshTrends(true); });
+  // sidebar width: drag its left edge (or arrow keys on the edge); kept between visits on this browser
+  {
+    const grip = document.getElementById('sideGrip'), root = document.documentElement.style;
+    const SIDE_MIN = 240, sideMax = () => Math.max(SIDE_MIN, Math.min(560, window.innerWidth * 0.5));
+    const setSide = w => {
+      w = Math.round(Math.max(SIDE_MIN, Math.min(sideMax(), w)));
+      root.setProperty('--side-w', w + 'px');
+      grip.setAttribute('aria-valuenow', w);
+      return w;
+    };
+    let w0 = 300;
+    try { w0 = +localStorage.getItem('sideW') || 300; } catch (e) {}
+    let sideW = setSide(w0);
+    const save = () => { try { localStorage.setItem('sideW', sideW); } catch (e) {} };
+    grip.addEventListener('pointerdown', e => {
+      e.preventDefault(); e.stopPropagation();
+      grip.setPointerCapture(e.pointerId); grip.classList.add('drag'); document.body.classList.add('resizing');
+    });
+    grip.addEventListener('pointermove', e => {
+      if (grip.classList.contains('drag')) sideW = setSide(window.innerWidth - e.clientX);
+    });
+    const end = () => { grip.classList.remove('drag'); document.body.classList.remove('resizing'); save(); };
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+    grip.addEventListener('keydown', e => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault(); e.stopPropagation();
+      sideW = setSide(sideW + (e.key === 'ArrowLeft' ? 20 : -20)); save();
+    });
+    window.addEventListener('resize', () => { sideW = setSide(sideW); });
+  }
+
+  // play: moves smoothly through the range, about 1.5 years a second
+  const playSpeed = 1.5;
+  let lastT = 0, lastPainted = -1;
+  function setPlaying(on) {
+    tState.playing = on;
+    playBtn.setAttribute('aria-label', on ? 'Pause' : 'Play');
+    playIcon.innerHTML = on ? '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>' : '<path d="M7 4l13 8-13 8z"/>';
+    if (on) {
+      if (tState.year >= tState.to) tState.year = tState.from;
+      lastT = performance.now();
+      requestAnimationFrame(tick);
+    }
+  }
+  function tick(now) {
+    if (!tState.playing) return;
+    tState.year = Math.min(tState.to, tState.year + Math.max(0, now - lastT) / 1000 * playSpeed);
+    lastT = now;
+    tYear.value = Math.round(tState.year);
+    tYearOut.textContent = Math.floor(tState.year);
+    tYearOut.classList.toggle('proj', Math.floor(tState.year) > yObs());
+    if (Math.abs(tState.year - lastPainted) >= 0.05 || tState.year >= tState.to) {
+      lastPainted = tState.year;
+      paintTrends();
+      renderTrendDetail();
+      if (trendMode() !== tick.mode) { tick.mode = trendMode(); renderLegend(); }   // 2026-11-15
+    }
+    if (tState.year >= tState.to) { tState.year = tState.to; setPlaying(false); refreshTrends(false); return; }
+    requestAnimationFrame(tick);
+  }
+  playBtn.addEventListener('click', () => setPlaying(!tState.playing));
+  // Space plays / pauses, the arrow keys step one year (not while typing or on a focused control)
+  document.addEventListener('keydown', e => {
+    if (!tState.v || e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (e.key === ' ' && tag !== 'BUTTON') { e.preventDefault(); setPlaying(!tState.playing); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      setPlaying(false);
+      tState.year = Math.max(tState.from, Math.min(tState.to, Math.round(tState.year) + (e.key === 'ArrowRight' ? 1 : -1)));
+      refreshTrends(false);
+    }
+  });
+
+  refreshTrends(true);
+
+  renderConts();
+  renderList();
+  setMode('sat');
+})();
+</script>
+</body>
+</html>
